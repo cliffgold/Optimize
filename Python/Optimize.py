@@ -660,7 +660,9 @@ def do_region(region):
     file_path = f'{outbox_path}/{inbox["Title"].loc["Initial"]}-{region}.csv'
     if os.path.exists(file_path):
         os.remove(file_path)
-    output_matrix_t = output_matrix.transpose()
+    # minimized returned a really really small number for outage.  Excel couldn't handle it.
+    # So rounding it to make that number 0.  Careful if you use really small numbers here.
+    output_matrix_t = output_matrix.round(8).transpose()
     output_matrix_t.to_csv(file_path)
     print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes') 
     
