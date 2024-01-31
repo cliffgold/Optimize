@@ -462,7 +462,10 @@ def run_minimizer(
                 fig_decadence(hourly_nrgs, MWh_nrgs, MW_nrgs, tweaked_nrgs)  
     
     hi_bound = max_add_nrgs.copy()
-    lo_bound = np.array([0.]  * len(nrgs))
+    lo_bound = pd.Series(0.,index=nrgs, dtype=float)
+    # Gas and Storage are as needed.  If knob < 1, is same as knob = 1 - no new capacity built
+    lo_bound['Gas']     = 1.0
+    lo_bound['Storage'] = 1.0
     bnds     = Bounds(lo_bound, hi_bound, True)
     method = 'Nelder-Mead'
     fatol = .0001
