@@ -1,0 +1,3 @@
+ex/ Swap nrg, 'xyz_abc' ; \w includes underline
+\.at\[nrg, *('\w*')
+.at[$1, nrg
