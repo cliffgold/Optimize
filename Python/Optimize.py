@@ -12,7 +12,7 @@ import warnings
 import multiprocessing as mp
 import traceback
 
-warnings.filterwarnings('error',module=r'.*Optimize_V.*')
+warnings.filterwarnings('error',module=r'.*Optimize.*')
 
 # Naming Rules:
 # ending in _nrgs: vector in nrgs below
@@ -58,7 +58,7 @@ debug_one_case = False
 debug_minimizer = False
 
 # Print out on each step of the minimizer 
-debug_step_minimizer = False
+debug_step_minimizer = True
 
 # Print out numbers that should not change in each year
 debug_unexpected_change = False
@@ -113,10 +113,7 @@ def get_all_regions():
     
 #Get hourly data
 def get_eia_data(region):
-    latest = open('./csv/Eia_Hourly/Latest.txt','r')
-    csv_date = latest.read()
-    latest.close()
-    eia_filename = f'{region}_master_{csv_date}.csv'
+    eia_filename = f'{region}_master.csv'
     csv_path = f'./csv/Eia_Hourly/latest/{eia_filename}'
 
     eia_csv = pd.read_csv(csv_path,
@@ -210,6 +207,7 @@ def fig_gas_and_storage(needed_hourly, gas_max, storage_max, stored, supply_MWh_
     outage_MWh   = 0
     excess   = 0
             
+    count = 0
     for hour_of_need in needed_hourly:
         #Already have too much NRG
         if(hour_of_need < 0):
@@ -243,6 +241,7 @@ def fig_gas_and_storage(needed_hourly, gas_max, storage_max, stored, supply_MWh_
             gas_used     += gas_max
             storage_used += stored
             stored        = 0
+        count += 1
     
     supply_MWh_nrgs['Gas']     = gas_used     / sample_years
     supply_MWh_nrgs['Storage'] = storage_used / sample_years
@@ -320,9 +319,20 @@ def add_output_year(
     output_matrix.at[year, 'CO2_Cost']    = CO2_cost 
     output_matrix.at[year, 'Total_MW']    = total_MW 
     output_matrix.at[year, 'Total_MWh']   = total_MWh
-    output_matrix.at[year, 'Total_Target']= target_hourly.sum()
+    output_matrix.at[year, 'Total_Target']= target_hourly.sum()/sample_years
     return output_matrix
-    
+
+ # Save Output file.  Also called if minimizer error
+def output_close(output_matrix, inbox, region):   
+    outbox_path = './python/mailbox/outbox'
+    file_path = f'{outbox_path}/{inbox["Title"].loc["Initial"]}-{region}.csv'
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    # minimized returned a really really small number for outage.  Excel couldn't handle it.
+    # So rounding it to make that number 0.  Careful if you use really small numbers here.
+    output_matrix_t = output_matrix.round(8).transpose()
+    output_matrix_t.to_csv(file_path)
+
 # Cost function used by minimizer
 def cost_function(     
                   MW_nrgs, 
@@ -485,7 +495,8 @@ def run_minimizer(
                   zero_nrgs,
                   knobs_nrgs,
                   inbox,
-                  region):
+                  region,
+                  output_matrix):
     
     #This is total energy produced - Storage is excluded to prevent double-counting
     # Also note that MW_nrgs['Storage'] units are actually MWh of capacity.  Not even compatable.
@@ -517,6 +528,7 @@ def run_minimizer(
     opt_done = False
     last_result = 0
     while(not(opt_done)):
+        minimizer_failure = False
         call_time = time.time()
         knobs = pd.Series(knobs_nrgs).values
         if(debug_minimizer):
@@ -551,6 +563,7 @@ def run_minimizer(
             print('***************** Minimizer Failed ********************')
             msgbox('Minimizer Failure', f'{results.message}, {inbox["Title"].loc["Initial"]}, {region}' , 1)
             print(results)
+            output_close(output_matrix, inbox, region)
             raise RuntimeError('Minimizer Failure' )
         elif(debug_minimizer):
             print (f'fatol {fatol} xatol {xatol}')
@@ -610,9 +623,12 @@ def do_region(region):
             
     MW_total      = MW_nrgs.sum()                       
     output_matrix = init_output_matrix()
-    hourly_cost   = (supply_MWh_nrgs * specs_nrgs.at['Variable', nrg]).sum()/(365.25*24)
-    hourly_cost  += (MW_nrgs  * specs_nrgs.at['Fixed', nrg]).sum()/(365.25*24)
-    expensive     = hourly_cost * 100
+    avg_cost_per_hour = 0
+    for nrg in nrgs:
+        avg_cost_per_hour += supply_MWh_nrgs[nrg] * specs_nrgs.at['Variable', nrg] / (365.25*24)
+        avg_cost_per_hour += MW_nrgs[nrg]         * specs_nrgs.at['Fixed', nrg]    / (365.25*24)
+
+    expensive     = avg_cost_per_hour * 100
     
     stored        = 0
     outage_MWh    = 0
@@ -668,7 +684,8 @@ def do_region(region):
                                 zero_nrgs       = zero_nrgs,
                                 knobs_nrgs      = knobs_nrgs,
                                 inbox           = inbox,
-                                region          = region)
+                                region          = region,
+                                output_matrix   = output_matrix)
                                 
         elif (debug_one_case):
             knobs_nrgs   = one_case(year)
@@ -711,15 +728,8 @@ def do_region(region):
               max_add_nrgs     = max_add_nrgs,
               target_hourly    = target_hourly)
         
-    # End of years for loop    
-    outbox_path = './python/mailbox/outbox'
-    file_path = f'{outbox_path}/{inbox["Title"].loc["Initial"]}-{region}.csv'
-    if os.path.exists(file_path):
-        os.remove(file_path)
-    # minimized returned a really really small number for outage.  Excel couldn't handle it.
-    # So rounding it to make that number 0.  Careful if you use really small numbers here.
-    output_matrix_t = output_matrix.round(8).transpose()
-    output_matrix_t.to_csv(file_path)
+    # End of years for loop
+    output_close(output_matrix, inbox, region)    
     print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes') 
     
 # Copied from Stack Overflow:
