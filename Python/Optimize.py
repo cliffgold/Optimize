@@ -58,7 +58,7 @@ debug_one_case = False
 debug_minimizer = False
 
 # Print out on each step of the minimizer 
-debug_step_minimizer = True
+debug_step_minimizer = False
 
 # Print out numbers that should not change in each year
 debug_unexpected_change = False
