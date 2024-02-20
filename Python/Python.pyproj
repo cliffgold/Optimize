@@ -5,7 +5,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{700fd32b-ff2a-4621-b3ca-4cc2dca1e4be}</ProjectGuid>
     <ProjectHome />
-    <StartupFile>plot_optimize.py</StartupFile>
+    <StartupFile>Optimize.py</StartupFile>
     <SearchPath />
     <WorkingDirectory>.</WorkingDirectory>
     <OutputPath>.</OutputPath>

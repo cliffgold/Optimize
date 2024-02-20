@@ -60,9 +60,10 @@ debug_minimizer = False
 # Print out on each step of the minimizer 
 debug_step_minimizer = False
 
-# Debug minimizer parameters
-debug_minimizer_params = True
-                
+# Debug minimizer initial state
+debug_minimizer_initials = False
+minimizer_params = pd.Series(['Phase', 'Year', 'Fatol', 'Xatol', 'Rerun', 'Gas_MW', 'Time'])
+minimizer_phases = pd.Series(['Normal', 'Max_Init', 'Min_Init'])
 
 # Print out numbers that should not change in each year
 debug_unexpected_change = False
@@ -167,18 +168,12 @@ def add_minimizer_matrix(
         minimizer_phase,
         years,
         year, 
-        fatol, 
-        xatol, 
-        rerun, 
         gas_MW, 
         time):
     
     row_num = (minimizer_phase * years) + year - 1
     minimizer_matrix.at[row_num, 'Phase']  = minimizer_phase 
     minimizer_matrix.at[row_num, 'Year']   = year
-    minimizer_matrix.at[row_num, 'Fatol']  = fatol 
-    minimizer_matrix.at[row_num, 'Xatol']  = xatol
-    minimizer_matrix.at[row_num, 'Rerun']  = rerun 
     minimizer_matrix.at[row_num, 'Gas_MW'] = gas_MW 
     minimizer_matrix.at[row_num, 'Time']   = time 
     return minimizer_matrix
@@ -522,10 +517,7 @@ def run_minimizer(
                   inbox,
                   region,
                   output_matrix,
-                  minimizer_phase,
-                  test_xatol,
-                  test_fatol,
-                  test_rerun):
+                  minimizer_phase):
     
     #This is total energy produced - Storage is excluded to prevent double-counting
     # Also note that MW_nrgs['Storage'] units are actually MWh of capacity.  Not even compatable.
@@ -540,11 +532,18 @@ def run_minimizer(
             max_add_nrgs[nrg] = 10.
         else:    
             max_add_nrgs[nrg] = tweaked_globals['Demand'] + ((tweaked_nrgs.at['Max_PCT', nrg]*MW_total)/MW_nrgs[nrg])
-        knobs_nrgs[nrg] = min(knobs_nrgs[nrg], max_add_nrgs[nrg] - .00001)
+        if debug_minimizer_initials:
+            if (minimizer_phases[minimizer_phase] == 'Max_Init'):
+                knobs_nrgs[nrg] = max_add_nrgs[nrg] - .00001
+            elif(minimizer_phases[minimizer_phase] == 'Min_Init'):
+                knobs_nrgs[nrg] = 1.0
+            else:
+                knobs_nrgs[nrg] = min(knobs_nrgs[nrg], max_add_nrgs[nrg] - .00001)
+        else:
+            knobs_nrgs[nrg] = min(knobs_nrgs[nrg], max_add_nrgs[nrg] - .00001)
     # and retire some old plants
     hourly_nrgs, supply_MWh_nrgs, MW_nrgs = \
                 fig_decadence(hourly_nrgs, supply_MWh_nrgs, MW_nrgs, tweaked_nrgs)  
-    
     hi_bound = max_add_nrgs.copy()
     lo_bound = pd.Series(0.,index=nrgs, dtype=float)
     # Gas and Storage are as needed.  If knob < 1, is same as knob = 1 - no new capacity built
@@ -552,14 +551,9 @@ def run_minimizer(
     lo_bound['Storage'] = 1.0
     bnds     = Bounds(lo_bound, hi_bound, True)
     method = 'Nelder-Mead'
-    if debug_minimizer_params:
-        fatol = test_fatol[minimizer_phase]
-        xatol = test_xatol[minimizer_phase]
-        rerun = test_rerun[minimizer_phase]
-    else:
-        fatol = .0001
-        xatol = .00001
-        rerun = .01
+    fatol  = .0001
+    xatol = .00001
+    rerun = .01
     opt_done = False
     last_result = 0
     while(not(opt_done)):
@@ -633,7 +627,7 @@ def one_case(year):
     return knobs_nrgs
     
 # main is a once-through operation, so we try to do as much calc here as possible
-def do_region(region, minimizer_phase=0, minimizer_matrix=0, test_fatol=0, test_xatol=0, test_rerun=0):
+def do_region(region, minimizer_phase=0, minimizer_matrix=0):
     start_time    = time.time()
     inbox         = get_inbox()
     years         = inbox['Years'].loc['Initial']
@@ -722,10 +716,7 @@ def do_region(region, minimizer_phase=0, minimizer_matrix=0, test_fatol=0, test_
                                 inbox           = inbox,
                                 region          = region,
                                 output_matrix   = output_matrix,
-                                minimizer_phase = minimizer_phase,
-                                test_xatol      = test_xatol,
-                                test_fatol      = test_fatol,
-                                test_rerun      = test_rerun)
+                                minimizer_phase = minimizer_phase)
                                 
         elif (debug_one_case):
             knobs_nrgs   = one_case(year)
@@ -768,22 +759,19 @@ def do_region(region, minimizer_phase=0, minimizer_matrix=0, test_fatol=0, test_
               max_add_nrgs     = max_add_nrgs,
               target_hourly    = target_hourly)
         
-        if (debug_minimizer_params): 
+        if (debug_minimizer_initials): 
             minimizer_matrix = add_minimizer_matrix( \
                 minimizer_matrix = minimizer_matrix,
                 minimizer_phase  = minimizer_phase,
                 years            = years,
                 year             = year,
-                fatol            = test_fatol[minimizer_phase],
-                xatol            = test_xatol[minimizer_phase],
-                rerun            = test_rerun[minimizer_phase],
                 gas_MW           = MW_nrgs['Gas'],
                 time             = time.time() - start_time)
         
 
     # End of years for loop
     output_close(output_matrix, inbox, region)
-    print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes - {minimizer_phase}')
+    print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes - {minimizer_phases[minimizer_phase]}')
     
 # Copied from Stack Overflow:
 
@@ -840,29 +828,14 @@ def main():
         for region in regions:
             do_region(region)
          
-    elif (debug_minimizer_params):
-        minimizer_params = pd.Series(['Phase', 'Year', 'Fatol', 'Xatol', 'Rerun', 'Gas_MW', 'Time'])
-        test_xatol = pd.Series()
-        test_fatol = pd.Series()
-        test_rerun = pd.Series()
-        
-        case_xatol = pd.Series([.00001, .000001, .0001])
-        case_fatol = pd.Series([.0001,  .001,    .00001])
-        case_rerun = pd.Series([.01])
+    elif (debug_minimizer_initials):
         case_now   = 0
-        for x in range(0,len(case_xatol)):
-            for f in range(0,len(case_fatol)): 
-                for r in range(0,len(case_rerun)):
-                    test_xatol[case_now] = case_xatol[x]
-                    test_fatol[case_now] = case_fatol[f]
-                    test_rerun[case_now] = case_rerun[r]
-                    case_now +=1
 
         minimizer_matrix = pd.DataFrame(columns=minimizer_params, dtype=float) 
 
-        for minimizer_phase in range(0,len(case_xatol) * len(case_fatol) * len(case_rerun)):
-            do_region(region, minimizer_phase, minimizer_matrix, test_xatol, test_fatol, test_rerun)
-        save_debug(minimizer_matrix, f'minimizer_Debug-{minimizer_phase}.csv')
+        for minimizer_phase in range(0,minimizer_phases.size):
+            do_region(region, minimizer_phase, minimizer_matrix)
+        save_debug(minimizer_matrix, 'Minimizer_Debug-Initial.csv')
                 
     else: 
         do_region(region)
