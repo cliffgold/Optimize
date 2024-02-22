@@ -55,15 +55,12 @@ kill_parallel = False
 debug_one_case = False
 
 # True = print minimize results
-debug_minimizer = False
+debug_minimizer = True
 
 # Print out on each step of the minimizer 
-debug_step_minimizer = False
-
-# Debug minimizer initial state
-debug_minimizer_initials = False
-minimizer_params = pd.Series(['Phase', 'Year', 'Fatol', 'Xatol', 'Rerun', 'Gas_MW', 'Time'])
-minimizer_phases = pd.Series(['Normal', 'Max_Init', 'Min_Init'])
+debug_step_minimizer = True
+debug_step_params = np.append('Year', nrgs)
+debug_step_params = np.append(debug_step_params, ['Outage', 'Cost'])
 
 # Print out numbers that should not change in each year
 debug_unexpected_change = False
@@ -163,20 +160,20 @@ def init_tweaks(specs_nrgs,inbox):
     tweaked_globals['Interest']  = 0
     return tweaked_globals, tweaked_nrgs
 
-def add_minimizer_matrix(
-        minimizer_matrix, 
-        minimizer_phase,
-        years,
-        year, 
-        gas_MW, 
-        time):
-    
-    row_num = (minimizer_phase * years) + year - 1
-    minimizer_matrix.at[row_num, 'Phase']  = minimizer_phase 
-    minimizer_matrix.at[row_num, 'Year']   = year
-    minimizer_matrix.at[row_num, 'Gas_MW'] = gas_MW 
-    minimizer_matrix.at[row_num, 'Time']   = time 
-    return minimizer_matrix
+def add_debug_matrix( \
+        debug_matrix,    
+        knobs_nrgs,
+        outage_MWh,
+        cost,
+        debug_count,
+        year):
+    for nrg in nrgs:
+        debug_matrix.at[debug_count, nrg]  = knobs_nrgs[nrg]   
+
+    debug_matrix.at[debug_count, 'Outage'] = outage_MWh
+    debug_matrix.at[debug_count, 'Cost']   = cost 
+    debug_matrix.at[debug_count, 'Year']   = year
+    return debug_matrix
 
 # Figure next year's info
 def fig_tweaks(    
@@ -445,7 +442,10 @@ def solve_this(
                tweaked_globals,
                tweaked_nrgs,
                expensive,      
-               zero_nrgs):   
+               zero_nrgs,
+               debug_count,
+               debug_matrix,
+               year):   
                
     knobs_nrgs = pd.Series(knobs, index=nrgs, dtype=float)
 
@@ -492,9 +492,9 @@ def solve_this(
                adj_zeros       = adj_zeros)
 
     if (debug_step_minimizer):
-        print(f'Knobs = {np.round(pd.Series(knobs_nrgs).values,4)} outage_MWh = {outage_MWh:,.0f} cost = {cost:,.0f}')
+        print(knobs,outage_MWh, cost)
 
-    return (cost)
+    return cost
 
 # Initialize for year 1 starting place
 def init_knobs(tweaked_globals, tweaked_nrgs):
@@ -517,7 +517,9 @@ def run_minimizer(
                   inbox,
                   region,
                   output_matrix,
-                  minimizer_phase):
+                  debug_count,
+                  debug_matrix,
+                  year):
     
     #This is total energy produced - Storage is excluded to prevent double-counting
     # Also note that MW_nrgs['Storage'] units are actually MWh of capacity.  Not even compatable.
@@ -532,15 +534,6 @@ def run_minimizer(
             max_add_nrgs[nrg] = 10.
         else:    
             max_add_nrgs[nrg] = tweaked_globals['Demand'] + ((tweaked_nrgs.at['Max_PCT', nrg]*MW_total)/MW_nrgs[nrg])
-        if debug_minimizer_initials:
-            if (minimizer_phases[minimizer_phase] == 'Max_Init'):
-                knobs_nrgs[nrg] = max_add_nrgs[nrg] - .00001
-            elif(minimizer_phases[minimizer_phase] == 'Min_Init'):
-                knobs_nrgs[nrg] = 1.0
-            else:
-                knobs_nrgs[nrg] = min(knobs_nrgs[nrg], max_add_nrgs[nrg] - .00001)
-        else:
-            knobs_nrgs[nrg] = min(knobs_nrgs[nrg], max_add_nrgs[nrg] - .00001)
     # and retire some old plants
     hourly_nrgs, supply_MWh_nrgs, MW_nrgs = \
                 fig_decadence(hourly_nrgs, supply_MWh_nrgs, MW_nrgs, tweaked_nrgs)  
@@ -575,7 +568,10 @@ def run_minimizer(
                         tweaked_globals,
                         tweaked_nrgs,
                         expensive,               
-                        zero_nrgs
+                        zero_nrgs,
+                        debug_count,
+                        debug_matrix,
+                        year
                        ),
                     bounds=bnds,                  
                     method=method, 
@@ -627,11 +623,15 @@ def one_case(year):
     return knobs_nrgs
     
 # main is a once-through operation, so we try to do as much calc here as possible
-def do_region(region, minimizer_phase=0, minimizer_matrix=0):
+def do_region(region):
     start_time    = time.time()
     inbox         = get_inbox()
     years         = inbox['Years'].loc['Initial']
     specs_nrgs    = get_specs_nrgs()
+    debug_count   = 0
+    if debug_step_minimizer:
+        debug_matrix = pd.DataFrame(columns=debug_step_params)
+ 
     hourly_nrgs, hourly_others = get_eia_data(region) 
     # If there is old data there, remove it
     outbox_path = './python/mailbox/outbox'    
@@ -702,7 +702,7 @@ def do_region(region, minimizer_phase=0, minimizer_matrix=0):
         after_optimize = False           
         # Normal run
         if normal_run:
-            knobs_nrgs, max_add_nrgs = run_minimizer( \
+            knobs_nrgs, max_add_nrgs, debug_count = run_minimizer( \
                                 hourly_nrgs     = hourly_nrgs,                  
                                 MW_nrgs         = MW_nrgs, 
                                 supply_MWh_nrgs = supply_MWh_nrgs,
@@ -716,7 +716,9 @@ def do_region(region, minimizer_phase=0, minimizer_matrix=0):
                                 inbox           = inbox,
                                 region          = region,
                                 output_matrix   = output_matrix,
-                                minimizer_phase = minimizer_phase)
+                                debug_count     = debug_count,
+                                debug_matrix    = debug_matrix,
+                                year            = year)
                                 
         elif (debug_one_case):
             knobs_nrgs   = one_case(year)
@@ -759,19 +761,9 @@ def do_region(region, minimizer_phase=0, minimizer_matrix=0):
               max_add_nrgs     = max_add_nrgs,
               target_hourly    = target_hourly)
         
-        if (debug_minimizer_initials): 
-            minimizer_matrix = add_minimizer_matrix( \
-                minimizer_matrix = minimizer_matrix,
-                minimizer_phase  = minimizer_phase,
-                years            = years,
-                year             = year,
-                gas_MW           = MW_nrgs['Gas'],
-                time             = time.time() - start_time)
-        
-
     # End of years for loop
     output_close(output_matrix, inbox, region)
-    print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes - {minimizer_phases[minimizer_phase]}')
+    print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes')
     
 # Copied from Stack Overflow:
 
@@ -827,16 +819,7 @@ def main():
         regions = get_all_regions()
         for region in regions:
             do_region(region)
-         
-    elif (debug_minimizer_initials):
-        case_now   = 0
-
-        minimizer_matrix = pd.DataFrame(columns=minimizer_params, dtype=float) 
-
-        for minimizer_phase in range(0,minimizer_phases.size):
-            do_region(region, minimizer_phase, minimizer_matrix)
-        save_debug(minimizer_matrix, 'Minimizer_Debug-Initial.csv')
-                
+                         
     else: 
         do_region(region)
         
