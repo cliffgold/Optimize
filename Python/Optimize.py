@@ -39,32 +39,32 @@ others         = np.array(['Hydro', 'Oil', 'Other'])
 
 # Output Matrix Columns
 output_header = pd.Series(['Year', 'CO2_Price', 'Outage', 'Total_MW', 'Total_MWh', 'Total_Target', 'Energy_Cost', 'CO2_Cost', 'Demand'])
-param_order   = pd.Series(['MW','Demand_MWh', 'Supply_MWh', 'Cost', 'CO2_Cost', 'CO2_MTon', 'MW_Cost', 'MWh_Cost', 'Knob', 'Max_Knob', 'Lifetime'])
+param_order   = pd.Series(['MW','Demand_MWh', 'Supply_MWh', 'Cost', 'CO2_Cost', 'CO2_MTon', 'MW_Cost', 'MWh_Cost', 'Start_Knob', 'Knob', 'Max_Knob'])
 tweaked_globals_order = pd.Series(['CO2_Price', 'Demand', 'Interest'])
 tweaked_nrgs_order    = pd.Series(['Capital','Fixed', 'perMW', 'perMWh', 'Max_PCT', 'Lifetime', 'CO2_gen'])
 
 #************ Debug Options ************
-# True = normal run - go through minimize()
-normal_run = True
-
 # True = do not run parallel processes
 kill_parallel = False
 
 # run one set of knobs/Year - no minimize()
-#  Also set normal_run to False
-debug_one_case = False
-
+debug_one_case = True
+if debug_one_case:
+    one_case_nrgs = pd.read_csv('Analysis/debug_knobs.csv')
+    one_case_nrgs.at[11, 'Gas'] = 1.0
+    one_case_nrgs.at[11, 'Nuclear'] = 1.15
 # True = print minimize results
-debug_minimizer = True
+debug_minimizer = False
 
 # Print out on each step of the minimizer
 debug_step_minimizer = False
-debug_step_params = pd.Series(['Year'])
-for nrg in nrgs:
-    debug_step_params = pd.concat([debug_step_params, pd.Series(['Knob_' + nrg])])
+if debug_step_minimizer:
+    debug_step_params = pd.Series(['Year'])
+    for nrg in nrgs:
+        debug_step_params = pd.concat([debug_step_params, pd.Series(['Knob_' + nrg])])
 
-debug_step_params = pd.concat([debug_step_params, pd.Series(['Outage', 'Cost'])])
-debug_matrix = pd.DataFrame(columns=debug_step_params)
+    debug_step_params = pd.concat([debug_step_params, pd.Series(['Outage', 'Cost'])])
+    debug_matrix = pd.DataFrame(columns=debug_step_params)
 
 
 # Print out numbers that should not change in each year
@@ -205,7 +205,7 @@ def fig_decadence(hourly_nrgs, supply_MWh_nrgs, MW_nrgs, tweaked_nrgs):
     return hourly_nrgs, supply_MWh_nrgs, MW_nrgs
     
 # Gas fills any leftover need.  If not enough, storage.  If not enough, outage (VERY expensive)
-def fig_gas_and_storage(needed_hourly, gas_max, storage_max, stored, supply_MWh_nrgs, after_optimize):
+def fig_gas_and_storage(needed_hourly, gas_max, storage_max, stored, supply_MWh_nrgs, after_optimize, year):
     # This is for debugging.  Want final run of each year.
     if(after_optimize):
         break_me = 1
@@ -283,9 +283,11 @@ def add_output_year(
                   outage_MWh,
                   output_matrix,
                   year,
+                  start_knobs,
                   knobs_nrgs,
                   max_add_nrgs,
-                  target_hourly):
+                  target_hourly
+                  ):
             
     output_matrix.at[year, 'Year']      = year
     output_matrix.at[year, 'CO2_Price'] = tweaked_globals['CO2_Price']
@@ -307,9 +309,9 @@ def add_output_year(
         output_matrix.at[year, nrg + '_Cost']     += supply_MWh_nrgs[nrg] * tweaked_nrgs.at['perMWh', nrg]
         output_matrix.at[year, nrg + '_CO2_MTon']  = supply_MWh_nrgs[nrg] * tweaked_nrgs.at['CO2_gen', nrg]
         output_matrix.at[year, nrg + '_CO2_Cost']  = supply_MWh_nrgs[nrg] * tweaked_nrgs.at['CO2_gen', nrg] * tweaked_globals['CO2_Price']
-        output_matrix.at[year, nrg + '_Knob']      = knobs_nrgs[nrg]
-        output_matrix.at[year, nrg + '_Max_Knob']  = max_add_nrgs[nrg]
-        output_matrix.at[year, nrg + '_Lifetime']  = tweaked_nrgs.at['Lifetime', nrg]
+        output_matrix.at[year, nrg + '_Start_Knob'] = start_knobs[nrg]
+        output_matrix.at[year, nrg + '_Knob']       = knobs_nrgs[nrg]
+        output_matrix.at[year, nrg + '_Max_Knob']   = max_add_nrgs[nrg]
         
 
         energy_cost += MW_nrgs[nrg]         * tweaked_nrgs.at['perMW', nrg]
@@ -374,7 +376,8 @@ def update_data(
                stored,        
                target_hourly, 
                zero_nrgs,
-               after_optimize):    
+               after_optimize,
+               year):    
     
     # This is for debugging.  Want final run of each year.
     if(after_optimize):
@@ -409,7 +412,8 @@ def update_data(
                 storage_max     = MW_nrgs['Storage'],
                 stored          = stored,
                 supply_MWh_nrgs = supply_MWh_nrgs,
-                after_optimize  = after_optimize)  
+                after_optimize  = after_optimize,
+                year            = year)  
           
     demand_MWh_nrgs = fig_excess(supply_MWh_nrgs, excess_MWh, after_optimize)
             
@@ -468,7 +472,8 @@ def solve_this(
                       stored          = new_stored,
                       target_hourly   = target_hourly,
                       zero_nrgs       = zero_nrgs,
-                      after_optimize  = False)
+                      after_optimize  = False,
+                      year            = year)
                                  
     cost = cost_function(
                MW_nrgs         = new_MW_nrgs,
@@ -517,6 +522,7 @@ def run_minimizer(
     # Also note that MW_nrgs['Storage'] units are actually MWh of capacity.  Not even compatable.
     MW_total     = MW_nrgs.sum() - MW_nrgs['Storage']
     
+    start_knobs  = pd.Series(1,index=nrgs, dtype=float)
     max_add_nrgs = pd.Series(1,index=nrgs, dtype=float)
     for nrg in nrgs:
         if nrg == 'Storage':
@@ -526,103 +532,106 @@ def run_minimizer(
             max_add_nrgs[nrg] = 10.
         else:    
             max_add_nrgs[nrg] = tweaked_globals['Demand'] + ((tweaked_nrgs.at['Max_PCT', nrg]*MW_total)/MW_nrgs[nrg])
+            
+        knobs_nrgs[nrg] = min(knobs_nrgs[nrg], max_add_nrgs[nrg] - .00001)
+        start_knobs[nrg] = knobs_nrgs[nrg].copy()
+        
     # and retire some old plants
     hourly_nrgs, supply_MWh_nrgs, MW_nrgs = \
-                fig_decadence(hourly_nrgs, supply_MWh_nrgs, MW_nrgs, tweaked_nrgs)  
-    hi_bound = max_add_nrgs.copy()
-    lo_bound = pd.Series(0.,index=nrgs, dtype=float)
-    # Gas and Storage are as needed.  If knob < 1, is same as knob = 1 - no new capacity built
-    lo_bound['Gas']     = 1.0
-    lo_bound['Storage'] = 1.0
-    bnds     = Bounds(lo_bound, hi_bound, True)
-    method = 'Nelder-Mead'
-    fatol  = .0001
-    xatol = .00001
-    rerun = .01
-    opt_done = False
-    last_result = 0
-    while(not(opt_done)):
-        minimizer_failure = False
-        call_time = time.time()
-        knobs = pd.Series(knobs_nrgs).values
-        if(debug_minimizer):
-            print(f'Start Knobs = {knobs}')
-            print(f'Max Knobs = {max_add_nrgs}')
-            print(bnds)
-            
-        if(debug_step_minimizer):
-            row_debug = len(debug_matrix)
-            debug_matrix.at[row_debug, 'Year'] = year * 100
-            for nrg in nrgs:
-                debug_matrix.at[row_debug, 'Knob_' + nrg] = knobs_nrgs[nrg]
+                fig_decadence(hourly_nrgs, supply_MWh_nrgs, MW_nrgs, tweaked_nrgs)
+    if (debug_one_case):
+        knobs_nrgs   = one_case(year)
+        max_add_nrgs = pd.Series(999.,index=nrgs, dtype=float)
+        start_knobs  = knobs_nrgs
+    else:
+        hi_bound = max_add_nrgs.copy()
+        lo_bound = pd.Series(0.,index=nrgs, dtype=float)
+        # Gas and Storage are as needed.  If knob < 1, is same as knob = 1 - no new capacity built
+        lo_bound['Gas']     = 1.0
+        lo_bound['Storage'] = 1.0
+        bnds     = Bounds(lo_bound, hi_bound, True)
+        method = 'Nelder-Mead'
+        fatol  = .0001
+        xatol = .00001
+        rerun = .01
+        opt_done = False
+        last_result = 0
+        while(not(opt_done)):
+            minimizer_failure = False
+            call_time = time.time()
+            knobs = pd.Series(knobs_nrgs).values
+            if(debug_minimizer):
+                print(f'Start Knobs = {knobs}')
+                print(f'Max Knobs = {max_add_nrgs}')
+                print(bnds)
                 
-            row_debug += 1
-            debug_matrix.at[row_debug, 'Year'] = year * 100 + 1
-            for nrg in nrgs:
-                debug_matrix.at[row_debug, 'Knob_' + nrg] = max_add_nrgs[nrg]
-
-        results =   minimize(
-                    solve_this, 
-                    knobs, 
-                    args=(                 
-                        hourly_nrgs,         
-                        MW_nrgs,
-                        supply_MWh_nrgs,
-                        stored,              
-                        target_hourly,
-                        tweaked_globals,
-                        tweaked_nrgs,
-                        expensive,               
-                        zero_nrgs,
-                        year
-                       ),
-                    bounds=bnds,                  
-                    method=method, 
-                    options={'fatol'  : fatol,
-                             'xatol'  : xatol,
-                             'maxiter': 10000,
-                             'maxfev' : 10000,
-                             'disp'   : False
-                            }
-        )
-        end_time = time.time() 
-
-        if not(results.success):
-            print('***************** Minimizer Failed ********************')
-            msgbox('Minimizer Failure', f'{results.message}, {inbox["Title"].loc["Initial"]}, {region}' , 1)
-            print(results)
-            output_close(output_matrix, inbox, region)
-            raise RuntimeError('Minimizer Failure' )
-        elif(debug_minimizer):
-            print (f'fatol {fatol} xatol {xatol}')
-            print(f'Knobs  {results.x}')
-            print(f'Results {results.fun:,.3f} Time {end_time - call_time:,.2f} with {results.nfev} runs')
-            
-        knobs      = results.x
-        knobs_nrgs = pd.Series(knobs, index=nrgs, dtype=float)   
-        if ((last_result > (results.fun * (1-rerun))) and \
-            (last_result < (results.fun * (1+rerun)))):
-            opt_done = True
-        else:
-            if(last_result > 0):
-                print('Extra try at minimizer')
-            last_result = results.fun
-            fatol       = fatol/10.
-            xatol       = xatol/10.
-                     
-    return knobs_nrgs, max_add_nrgs
+            if(debug_step_minimizer):
+                row_debug = len(debug_matrix)
+                debug_matrix.at[row_debug, 'Year'] = year * 100
+                for nrg in nrgs:
+                    debug_matrix.at[row_debug, 'Knob_' + nrg] = knobs_nrgs[nrg]
+                    
+                row_debug += 1
+                debug_matrix.at[row_debug, 'Year'] = year * 100 + 1
+                for nrg in nrgs:
+                    debug_matrix.at[row_debug, 'Knob_' + nrg] = max_add_nrgs[nrg]
+        
+            results =   minimize(
+                        solve_this, 
+                        knobs, 
+                        args=(                 
+                            hourly_nrgs,         
+                            MW_nrgs,
+                            supply_MWh_nrgs,
+                            stored,              
+                            target_hourly,
+                            tweaked_globals,
+                            tweaked_nrgs,
+                            expensive,               
+                            zero_nrgs,
+                            year
+                           ),
+                        bounds=bnds,                  
+                        method=method, 
+                        options={'fatol'  : fatol,
+                                 'xatol'  : xatol,
+                                 'maxiter': 10000,
+                                 'maxfev' : 10000,
+                                 'disp'   : False
+                                }
+            )
+            end_time = time.time() 
+        
+            if not(results.success):
+                print('***************** Minimizer Failed ********************')
+                msgbox('Minimizer Failure', f'{results.message}, {inbox["Title"].loc["Initial"]}, {region}' , 1)
+                print(results)
+                output_close(output_matrix, inbox, region)
+                raise RuntimeError('Minimizer Failure' )
+            elif(debug_minimizer):
+                print (f'fatol {fatol} xatol {xatol}')
+                print(f'Knobs  {results.x}')
+                print(f'Results {results.fun:,.3f} Time {end_time - call_time:,.2f} with {results.nfev} runs')
+                
+            knobs      = results.x
+            knobs_nrgs = pd.Series(knobs, index=nrgs, dtype=float)   
+            if ((last_result > (results.fun * (1-rerun))) and \
+                (last_result < (results.fun * (1+rerun)))):
+                opt_done = True
+            else:
+                if(last_result > 0):
+                    print('Extra try at minimizer')
+                last_result = results.fun
+                fatol       = fatol/10.
+                xatol       = xatol/10.
+                         
+    return knobs_nrgs, max_add_nrgs, start_knobs
 
 def one_case(year):
     # This array reverses decadence - so starting place is the same
     #  redemption = np.array([1.034483,	1.041666,	1.02564,	1.04167,	1.02564,	0.])
     #  Optimized Case
-    # test_cases = np.array([[1.7906705,  1.15446494, 1.03271335, 1.12593594, 0.91245342, 0.23845428]])
-    test_cases =   np.array([[1.034483,	1.041666,	1.02564,	1.04167,	1.02564,	1.999],
-                             [1.034483,	1.041666,	1.02564,	1.04167,	1.02564,	1.999],
-                             [1.034483,	1.041666,	1.02564,	1.04167,	1.02564,	1.999]])
-    knobs = test_cases[year-1]
-    knobs_nrgs = pd.Series(knobs, index=nrgs, dtype=float)
-    print(knobs)
+    knobs_nrgs = one_case_nrgs.loc[year-1]
     return knobs_nrgs
     
 # main is a once-through operation, so we try to do as much calc here as possible
@@ -680,6 +689,7 @@ def do_region(region):
                     outage_MWh      = outage_MWh,
                     output_matrix   = output_matrix,
                     year            = 0,
+                    start_knobs     = knobs_nrgs,
                     knobs_nrgs      = knobs_nrgs,
                     max_add_nrgs    = knobs_nrgs,
                     target_hourly   = target_hourly)
@@ -700,28 +710,23 @@ def do_region(region):
     
 # Now optimize this year 
         after_optimize = False           
-        # Normal run
-        if normal_run:
-            knobs_nrgs, max_add_nrgs = run_minimizer( \
-                                hourly_nrgs     = hourly_nrgs,                  
-                                MW_nrgs         = MW_nrgs, 
-                                supply_MWh_nrgs = supply_MWh_nrgs,
-                                stored          = stored,              
-                                target_hourly   = target_hourly,
-                                tweaked_globals = tweaked_globals,
-                                tweaked_nrgs    = tweaked_nrgs,
-                                expensive       = expensive,               
-                                zero_nrgs       = zero_nrgs,
-                                knobs_nrgs      = knobs_nrgs,
-                                inbox           = inbox,
-                                region          = region,
-                                output_matrix   = output_matrix,
-                                year            = year)
-                                
-        elif (debug_one_case):
-            knobs_nrgs   = one_case(year)
-            max_add_nrgs = pd.Series(999.,index=nrgs, dtype=float)
-             
+        knobs_nrgs, max_add_nrgs, start_knobs = \
+            run_minimizer( \
+                            hourly_nrgs     = hourly_nrgs,                  
+                            MW_nrgs         = MW_nrgs, 
+                            supply_MWh_nrgs = supply_MWh_nrgs,
+                            stored          = stored,              
+                            target_hourly   = target_hourly,
+                            tweaked_globals = tweaked_globals,
+                            tweaked_nrgs    = tweaked_nrgs,
+                            expensive       = expensive,               
+                            zero_nrgs       = zero_nrgs,
+                            knobs_nrgs      = knobs_nrgs,
+                            inbox           = inbox,
+                            region          = region,
+                            output_matrix   = output_matrix,
+                            year            = year)
+                     
         after_optimize = True
 # Update data based on optimized knobs 
             
@@ -741,7 +746,8 @@ def do_region(region):
                     stored             = stored,
                     target_hourly      = target_hourly,
                     zero_nrgs          = zero_nrgs,
-                    after_optimize     = after_optimize)
+                    after_optimize     = after_optimize,
+                    year               = year)
 
 # Output results of this year             
         output_matrix = \
@@ -755,13 +761,15 @@ def do_region(region):
               outage_MWh       = outage_MWh,
               output_matrix    = output_matrix,
               year             = year,
+              start_knobs      = start_knobs,
               knobs_nrgs       = knobs_nrgs,
               max_add_nrgs     = max_add_nrgs,
               target_hourly    = target_hourly)
         
     # End of years for loop
     output_close(output_matrix, inbox, region)
-    save_debug('Debug_Step.csv')
+    if (debug_step_minimizer):
+        save_debug('Debug_Step.csv')
     print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes')
     
 # Copied from Stack Overflow:
