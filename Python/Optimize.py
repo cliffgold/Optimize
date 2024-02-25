@@ -1,5 +1,4 @@
-﻿from random import sample
-from tkinter import messagebox
+﻿from tkinter import messagebox
 import numpy as np
 import pandas as pd
 import numpy_financial as npf
@@ -38,7 +37,7 @@ nrgs           = np.array(['Solar', 'Wind', 'Nuclear', 'Gas', 'Coal', 'Storage']
 others         = np.array(['Hydro', 'Oil', 'Other'])
 
 # Output Matrix Columns
-output_header = pd.Series(['Year', 'CO2_Price', 'Outage', 'Total_MW', 'Total_MWh', 'Total_Target', 'Energy_Cost', 'CO2_Cost', 'Demand'])
+output_header = pd.Series(['Year', 'CO2_Price', 'Outage', 'Total_MW', 'Total_MWh', 'Total_Target', 'MW_Cost', 'MWh_Cost', 'Outage_Cost','CO2_Cost', 'MW_MWh_Outage_Cost', 'Including_CO2_Cost','Demand'])
 param_order   = pd.Series(['MW','Demand_MWh', 'Supply_MWh', 'Cost', 'CO2_Cost', 'CO2_MTon', 'MW_Cost', 'MWh_Cost', 'Start_Knob', 'Knob', 'Max_Knob'])
 tweaked_globals_order = pd.Series(['CO2_Price', 'Demand', 'Interest'])
 tweaked_nrgs_order    = pd.Series(['Capital','Fixed', 'perMW', 'perMWh', 'Max_PCT', 'Lifetime', 'CO2_gen'])
@@ -48,7 +47,7 @@ tweaked_nrgs_order    = pd.Series(['Capital','Fixed', 'perMW', 'perMWh', 'Max_PC
 kill_parallel = False
 
 # run one set of knobs/Year - no minimize()
-debug_one_case = True
+debug_one_case = False
 if debug_one_case:
     one_case_nrgs = pd.read_csv('Analysis/debug_knobs.csv')
     one_case_nrgs.at[11, 'Gas'] = 1.0
@@ -294,19 +293,20 @@ def add_output_year(
     output_matrix.at[year, 'Outage']    = outage_MWh
     output_matrix.at[year, 'Demand']    = tweaked_globals['Demand']
     
-    energy_cost = 0
+    MW_cost     = 0
+    MWh_cost    = 0
     total_CO2   = 0
     total_MW    = 0
     total_MWh   = 0
     
     for nrg in nrgs:
-        output_matrix.at[year, nrg + '_MW']        = MW_nrgs[nrg]  
+        output_matrix.at[year, nrg + '_MW']         = MW_nrgs[nrg]  
         output_matrix.at[year, nrg + '_Demand_MWh'] = demand_MWh_nrgs[nrg]  
         output_matrix.at[year, nrg + '_Supply_MWh'] = supply_MWh_nrgs[nrg]
-        output_matrix.at[year, nrg + '_MW_Cost']   = MW_nrgs[nrg]  * tweaked_nrgs.at['perMW', nrg]
-        output_matrix.at[year, nrg + '_MWh_Cost']  = supply_MWh_nrgs[nrg] * tweaked_nrgs.at['perMWh', nrg]
-        output_matrix.at[year, nrg + '_Cost']      = MW_nrgs[nrg]  * tweaked_nrgs.at['perMW', nrg]
-        output_matrix.at[year, nrg + '_Cost']     += supply_MWh_nrgs[nrg] * tweaked_nrgs.at['perMWh', nrg]
+        output_matrix.at[year, nrg + '_MW_Cost']    = MW_nrgs[nrg]  * tweaked_nrgs.at['perMW', nrg]
+        output_matrix.at[year, nrg + '_MWh_Cost']   = supply_MWh_nrgs[nrg] * tweaked_nrgs.at['perMWh', nrg]
+        output_matrix.at[year, nrg + '_Cost']       = MW_nrgs[nrg]  * tweaked_nrgs.at['perMW', nrg]
+        output_matrix.at[year, nrg + '_Cost']      += supply_MWh_nrgs[nrg] * tweaked_nrgs.at['perMWh', nrg]
         output_matrix.at[year, nrg + '_CO2_MTon']  = supply_MWh_nrgs[nrg] * tweaked_nrgs.at['CO2_gen', nrg]
         output_matrix.at[year, nrg + '_CO2_Cost']  = supply_MWh_nrgs[nrg] * tweaked_nrgs.at['CO2_gen', nrg] * tweaked_globals['CO2_Price']
         output_matrix.at[year, nrg + '_Start_Knob'] = start_knobs[nrg]
@@ -314,18 +314,22 @@ def add_output_year(
         output_matrix.at[year, nrg + '_Max_Knob']   = max_add_nrgs[nrg]
         
 
-        energy_cost += MW_nrgs[nrg]         * tweaked_nrgs.at['perMW', nrg]
-        energy_cost += supply_MWh_nrgs[nrg] * tweaked_nrgs.at['perMWh', nrg]
-        total_CO2   += supply_MWh_nrgs[nrg] * tweaked_nrgs.at['CO2_gen', nrg]
+        MW_cost   += MW_nrgs[nrg]          * tweaked_nrgs.at['perMW', nrg]
+        MWh_cost  += supply_MWh_nrgs[nrg]  * tweaked_nrgs.at['perMWh', nrg]
+        total_CO2 += supply_MWh_nrgs[nrg]  * tweaked_nrgs.at['CO2_gen', nrg]
         # Storage is really not a producer, and its MW is really MWh of capacity
         if (nrg != 'Storage'):
             total_MW    += MW_nrgs[nrg]
             total_MWh   += supply_MWh_nrgs[nrg]
     
-    CO2_cost     = total_CO2 * tweaked_globals['CO2_Price']
-    energy_cost += outage_MWh * expensive
-    output_matrix.at[year, 'Energy_Cost'] = energy_cost
-    output_matrix.at[year, 'CO2_Cost']    = CO2_cost 
+    output_matrix.at[year, 'MW_Cost']            = MW_cost
+    output_matrix.at[year, 'MWh_Cost']           = MWh_cost
+    output_matrix.at[year, 'Outage_Cost']        = outage_MWh * expensive
+    output_matrix.at[year, 'CO2_Cost']           = total_CO2  * tweaked_globals['CO2_Price'] 
+    
+    output_matrix.at[year, 'MW_MWh_Outage_Cost'] = output_matrix[['MW_Cost','MWh_Cost','Outage_Cost']].loc[year].sum()
+    output_matrix.at[year, 'Including_CO2_Cost'] = output_matrix[['MW_MWh_Outage_Cost', 'CO2_Cost']].loc[year].sum()
+    
     output_matrix.at[year, 'Total_MW']    = total_MW 
     output_matrix.at[year, 'Total_MWh']   = total_MWh
     output_matrix.at[year, 'Total_Target']= target_hourly.sum()/sample_years
