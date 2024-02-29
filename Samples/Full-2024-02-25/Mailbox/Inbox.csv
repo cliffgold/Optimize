@@ -1,3 +1,0 @@
-,Directory,Title,Region,Years,Interest,CO2_Price,Demand,Solar_Capital,Wind_Capital,Nuclear_Capital,Gas_Capital,Coal_Capital,Storage_Capital,Solar_Fixed,Wind_Fixed,Nuclear_Fixed,Gas_Fixed,Coal_Fixed,Storage_Fixed,Solar_Variable,Wind_Variable,Nuclear_Variable,Gas_Variable,Coal_Variable,Storage_Variable,Solar_Max_PCT,Wind_Max_PCT,Nuclear_Max_PCT,Gas_Max_PCT,Coal_Max_PCT,Storage_Max_PCT,Solar_Lifetime,Wind_Lifetime,Nuclear_Lifetime,Gas_Lifetime,Coal_Lifetime,Storage_Lifetime
-Initial,Debug-2024-02-25,CO2-500,All,27,0.12,500,1.02,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
-Yearly,,,,,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
