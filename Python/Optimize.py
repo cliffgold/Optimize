@@ -230,16 +230,11 @@ def fig_gas_and_storage(needed_hourly, gas_max, storage_max, stored, supply_MWh_
             gas_used += hour_of_need + (storage_max - stored)
             stored    = storage_max
         # Enough gas to avoid outage + a little left over for stored
-        elif (hour_of_need < gas_max):
-            path = "Some_Charge"
-            gas_used += gas_max
-            stored   += gas_max - hour_of_need
-        # Enough gas + storage to meet need
         elif (hour_of_need < gas_max + stored):
-            path = 'Use_Store'
-            gas_used     += gas_max
-            stored       -= hour_of_need - gas_max
-            storage_used += hour_of_need - gas_max
+            path = "Discharge+Some_Gas"           
+            gas_used     += hour_of_need - stored
+            storage_used += stored
+            stored        = 0
         # Not enough to meet need
         else:
             path = 'UhOh'
