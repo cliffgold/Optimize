@@ -805,7 +805,7 @@ def main():
     print('Starting ', inbox['Title'].loc['Initial'])
     
         
-    if (not kill_parallel) and (region == 'All'):
+    if (not kill_parallel) and (region == 'US'):
         regions = get_all_regions()
         region_process = pd.Series(0,index=regions,dtype=object)
 
@@ -825,8 +825,8 @@ def main():
             else:
                 print(region, ' Done')
                 
-    # kill_parallel True or not 'All'
-    elif region == 'All':
+    # kill_parallel True or not 'US'
+    elif region == 'US':
         regions = get_all_regions()
         for region in regions:
             do_region(region)
