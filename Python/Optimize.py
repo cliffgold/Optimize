@@ -50,8 +50,11 @@ kill_parallel = False
 debug_one_case = False
 if debug_one_case:
     one_case_nrgs = pd.read_csv('Analysis/debug_knobs.csv')
-    one_case_nrgs.at[11, 'Gas'] = 1.0
-    one_case_nrgs.at[11, 'Nuclear'] = 1.15
+#    one_case_nrgs.at[11, 'Gas'] = 1.0
+#    one_case_nrgs.at[11, 'Nuclear'] = 1.15
+    debug_matrix = pd.DataFrame(columns=pd.Series(['Count', 'Hour of Need', 'Gas_MWh', 'Storage_MWh', 'Outage_MWh'])
+    debug_filename = 'One_Case_Orig.csv'
+
 # True = print minimize results
 debug_minimizer = False
 
@@ -64,6 +67,7 @@ if debug_step_minimizer:
 
     debug_step_params = pd.concat([debug_step_params, pd.Series(['Outage', 'Cost'])])
     debug_matrix = pd.DataFrame(columns=debug_step_params)
+    debug_filename = 'Debug_Step.csv'
 
 
 # Print out numbers that should not change in each year
@@ -245,13 +249,14 @@ def fig_gas_and_storage(needed_hourly, gas_max, storage_max, stored, supply_MWh_
             path = 'UhOh'
             outage_MWh   += hour_of_need - gas_max - stored                    
             gas_used     += gas_max
-            storage_used += stored
+            storage_used += stored     
             stored        = 0
         count += 1
     
     supply_MWh_nrgs['Gas']     = gas_used     / sample_years
     supply_MWh_nrgs['Storage'] = storage_used / sample_years
     excess_MWh                 = excess       / sample_years
+    outage_MWh                 = outage_MWh   / sample_years
     
     return supply_MWh_nrgs, outage_MWh, stored, excess_MWh
 
@@ -773,7 +778,8 @@ def do_region(region):
     # End of years for loop
     output_close(output_matrix, inbox, region)
     if (debug_step_minimizer):
-        save_debug('Debug_Step.csv')
+        save_debug(debug_filename)
+        
     print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes')
     
 # Copied from Stack Overflow:
