@@ -52,7 +52,7 @@ if debug_one_case:
     one_case_nrgs = pd.read_csv('Analysis/debug_knobs.csv')
 #    one_case_nrgs.at[11, 'Gas'] = 1.0
 #    one_case_nrgs.at[11, 'Nuclear'] = 1.15
-    debug_matrix = pd.DataFrame(columns=pd.Series(['Count', 'Hour of Need', 'Gas_MWh', 'Storage_MWh', 'Outage_MWh'])
+    debug_matrix = pd.DataFrame(columns=pd.Series(['Count', 'Hour of Need', 'Gas_MWh', 'Storage_MWh', 'Outage_MWh']))
     debug_filename = 'One_Case_Orig.csv'
 
 # True = print minimize results
