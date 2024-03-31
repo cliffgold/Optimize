@@ -157,7 +157,7 @@ def init_tweaks(specs_nrgs,inbox):
         tweaked_nrgs.at['Fixed', nrg]   = specs_nrgs.at['Fixed', nrg]   
         tweaked_nrgs.at['perMWh', nrg]  = specs_nrgs.at['Variable', nrg]
         tweaked_nrgs.at['perMW', nrg]   = specs_nrgs.at['Fixed', nrg] + \
-                     (-4 * npf.pmt(inbox['Interest'].loc['Initial']/4, specs_nrgs.at['Lifetime', nrg]*4,specs_nrgs.at['Capital', nrg]))
+                     (-4 * npf.pmt(inbox.at['Interest','Initial']/4, specs_nrgs.at['Lifetime', nrg]*4,specs_nrgs.at['Capital', nrg]))
         tweaked_nrgs.at['Lifetime', nrg] = specs_nrgs.at['Lifetime', nrg]
         tweaked_nrgs.at['Max_PCT', nrg]  = specs_nrgs.at['Max_PCT', nrg]
         tweaked_nrgs.at['CO2_gen', nrg]  = specs_nrgs.at['CO2_gen', nrg]
@@ -177,22 +177,22 @@ def fig_tweaks(
 
     if year == 1:
         loc_ = 'Initial'
-        tweaked_globals['CO2_Price'] = inbox['CO2_Price'].loc[loc_]
-        tweaked_globals['Demand']    = inbox['Demand'].loc[loc_] 
-        tweaked_globals['Interest']  = inbox['Interest'].loc[loc_]
+        tweaked_globals['CO2_Price'] = inbox.at['CO2_Price', loc_]
+        tweaked_globals['Demand']    = inbox.at['Demand', loc_] 
+        tweaked_globals['Interest']  = inbox.at['Interest', loc_]
         
     else:
         loc_ = 'Yearly'
-        tweaked_globals['CO2_Price'] += inbox['CO2_Price'].loc[loc_]
-        tweaked_globals['Demand']    *= inbox['Demand'].loc[loc_] 
-        tweaked_globals['Interest']  *= inbox['Interest'].loc[loc_] 
+        tweaked_globals['CO2_Price'] += inbox.at['CO2_Price', loc_]
+        tweaked_globals['Demand']    *= inbox.at['Demand', loc_] 
+        tweaked_globals['Interest']  *= inbox.at['Interest', loc_] 
     
     for nrg in nrgs: 
-        tweaked_nrgs.at['Capital', nrg]  *= inbox[nrg + '_Capital'].loc[loc_]
-        tweaked_nrgs.at['Fixed', nrg]    *= inbox[nrg + '_Fixed'].loc[loc_]
-        tweaked_nrgs.at['Lifetime', nrg] *= inbox[nrg + '_Lifetime'].loc[loc_]
-        tweaked_nrgs.at['Max_PCT', nrg]  *= inbox[nrg + '_Max_PCT'].loc[loc_]
-        tweaked_nrgs.at['perMWh', nrg]   *= inbox[nrg + '_Variable'].loc[loc_]
+        tweaked_nrgs.at['Capital', nrg]  *= inbox.at[nrg + '_Capital', loc_]
+        tweaked_nrgs.at['Fixed', nrg]    *= inbox.at[nrg + '_Fixed', loc_]
+        tweaked_nrgs.at['Lifetime', nrg] *= inbox.at[nrg + '_Lifetime', loc_]
+        tweaked_nrgs.at['Max_PCT', nrg]  *= inbox.at[nrg + '_Max_PCT', loc_]
+        tweaked_nrgs.at['perMWh', nrg]   *= inbox.at[nrg + '_Variable', loc_]
         
         tweaked_nrgs.at['perMW', nrg]     = tweaked_nrgs.at['Fixed', nrg] + \
                          (-4 * npf.pmt(tweaked_globals['Interest']/4, tweaked_nrgs.at['Lifetime', nrg]*4,tweaked_nrgs.at['Capital', nrg]))
@@ -343,7 +343,7 @@ def add_output_year(
  # Save Output file.  Also called if minimizer error
 def output_close(output_matrix, inbox, region):   
     outbox_path = './python/mailbox/outbox'
-    file_path = f'{outbox_path}/{inbox["Title"].loc["Initial"]}-{region}.csv'
+    file_path = f'{outbox_path}/{inbox.at["Title", "Text"]}-{region}.csv'
     if os.path.exists(file_path):
         os.remove(file_path)
     # minimized returned a really really small number for outage.  Excel couldn't handle it.
@@ -613,7 +613,7 @@ def run_minimizer(
         
             if not(results.success):
                 print('***************** Minimizer Failed ********************')
-                msgbox('Minimizer Failure', f'{results.message}, {inbox["Title"].loc["Initial"]}, {region}' , 1)
+                msgbox('Minimizer Failure', f'{results.message}, {inbox.at["Title", "Text"]}, {region}' , 1)
                 print(results)
                 output_close(output_matrix, inbox, region)
                 raise RuntimeError('Minimizer Failure' )
@@ -647,13 +647,13 @@ def one_case(year):
 def do_region(region):
     start_time    = time.time()
     inbox         = get_inbox()
-    years         = inbox['Years'].loc['Initial']
+    years         = inbox.at['Years', 'Initial']
     specs_nrgs    = get_specs_nrgs()
  
     hourly_nrgs, hourly_others = get_eia_data(region) 
     # If there is old data there, remove it
     outbox_path = './python/mailbox/outbox'    
-    file_path = f'{outbox_path}/{inbox["Title"].loc["Initial"]}-{region}.csv'
+    file_path = f'{outbox_path}/{inbox.at["Title", "Text"]}-{region}.csv'
     if os.path.exists(file_path):
         os.remove(file_path)
     
@@ -807,8 +807,8 @@ class Process(mp.Process):
 
 def main():
     inbox         = get_inbox()
-    region        = inbox['Region'].loc['Initial']
-    print('Starting ', inbox['Title'].loc['Initial'])
+    region        = inbox.at['Region', 'Text']
+    print('Starting ', inbox.at['Title', 'Text'])
     
         
     if (not kill_parallel) and (region == 'US'):
@@ -825,8 +825,8 @@ def main():
             region_process[region].join()
             if(region_process[region].exception):
                 error, traceback = region_process[region].exception
-                print (region, inbox['Title'].loc['Initial'], 'Error')
-                msgbox("Process Error", f"{region} {inbox['Title'].loc['Initial']} Error", 1)
+                print (region, inbox.at['Title', 'Text'], 'Error')
+                msgbox("Process Error", f"{region} {inbox.at['Title', 'Text']} Error", 1)
                 print(traceback)
             else:
                 print(region, ' Done')
