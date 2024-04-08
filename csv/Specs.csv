@@ -1,5 +1,5 @@
 ,Generated from ..\Macro\Specs_Gen.xlsm,,,,,
-,Solar,Wind,Nuclear,Gas,Coal,Storage
+,Solar,Wind,Nuclear,Gas,Coal,Battery
 Capital,1.448,2.098,7.777,1.33,4.507,1.27
 Fixed,0.02524345,0.036887328,0.137038878,0.021277712,0.05290281,0.045793584
 Variable,0,0,0.00001011,0.0000244,0.00002328,0.00001377
