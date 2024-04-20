@@ -242,8 +242,13 @@ def fig_gas_and_storage(needed_hourly,
             
 
     for hour_of_need in needed_hourly:
+        # Enough gas for everybody - most common, does it help to go first?
+        if (hour_of_need <= gas_max) and (hour_of_need >= 0):
+            path = 'Enough_Gas'
+            gas_used += hour_of_need
+            
         #Already have too much NRG
-        if(hour_of_need < 0):
+        elif(hour_of_need < 0):
             path              = "Excess"
             chargeable_molten = min(molten_max - molten_stored, nuclear_hourly[hour])
             # Can excess be used to charge molten, with some left over?
@@ -265,11 +270,6 @@ def fig_gas_and_storage(needed_hourly,
             else:
                 battery_stored += -hour_of_need
                 # nothing added to excess
-        # Enough gas for everybody
-        elif (hour_of_need <= gas_max):
-            path = 'Enough_Gas'
-            gas_used += hour_of_need
-            
         # Enough gas + molten to meet need
         elif (hour_of_need < gas_max + molten_stored):
             path           = 'Use_Molten'
