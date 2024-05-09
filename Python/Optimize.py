@@ -25,7 +25,7 @@ warnings.filterwarnings('error',module=r'.*Optimize.*')
 #Globals
 
 dirname, filename = os.path.split(os.path.abspath(__file__))
-os.chdir(dirname + '\\..')
+os.chdir(dirname + '/..')
 
 # had to add to deletechars, they got inserted at the beginning of the first genfromtext entry.
 sample_years   = 4
