@@ -115,7 +115,7 @@ def get_specs_nrgs():
 
 # Get parameters set in overlord by user
 def get_inbox():
-    inbox = pd.read_csv('./Python/Mailbox/inbox.csv', 
+    inbox = pd.read_csv('./Python/Mailbox/Inbox.csv', 
                          header=0, 
                          index_col=0)
     inbox = df_int_to_float(inbox)
