@@ -4,8 +4,7 @@ Macro/Old/
 Python-OldGIT/
 Results/
 Python/.vs/
-Python/Mailbox/
-Stable/
+Python/Mailbox/Outbox/*
 **/~$*
 
 /csv/Eia_Hourly/Previous

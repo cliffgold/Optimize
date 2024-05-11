@@ -66,8 +66,8 @@ if debug_step_minimizer:
         debug_step_params = pd.concat([debug_step_params, pd.Series(['Knob_' + nrg])])
 
     debug_step_params = pd.concat([debug_step_params, pd.Series(['Outage', 'Cost'])])
-    debug_matrix = pd.DataFrame(columns=debug_step_params)
-    debug_filename = 'Debug_Step'
+    debug_matrix      = pd.DataFrame(columns=debug_step_params)
+    debug_filename    = 'Debug_Step'
 
 
 # Print out numbers that should not change in each year
@@ -81,9 +81,11 @@ if debug_final_run:
     debug_matrix = pd.DataFrame(columns=debug_final_run_params)
     debug_filename = 'Debug_final_run'
 
-def msgbox(title, text, style):
-    return ctypes.windll.user32.MessageBoxW(0, text, title, style)
 
+def double_print(message, logf):
+    print(message)
+    logf.write(message + '\n')
+    
 def df_int_to_float(df):
     list = df.select_dtypes(include=['int']).columns.tolist()
     df[list] = df[list].astype(float) 
@@ -95,14 +97,14 @@ def round_significant(x,sig):
 
 # Save debug matrix
 def save_debug(file_name, matrix):
-   file_path = './python/mailbox/outbox/' + file_name + '.csv'
+   file_path = './Python/Mailbox/Outbox/' + file_name + '.csv'
    if os.path.exists(file_path):
        os.remove(file_path)
    matrix.to_csv(file_path)
       
 # Get price, CO2 generated, etc for each nrg
 def get_specs_nrgs():
-    specs_nrgs = pd.read_csv('./csv/specs.csv',
+    specs_nrgs = pd.read_csv('./CSV/Specs.csv',
                          header=0, 
                          skiprows=1, 
                          index_col=0)
@@ -113,7 +115,7 @@ def get_specs_nrgs():
 
 # Get parameters set in overlord by user
 def get_inbox():
-    inbox = pd.read_csv('./Python/mailbox/inbox.csv', 
+    inbox = pd.read_csv('./Python/Mailbox/inbox.csv', 
                          header=0, 
                          index_col=0)
     inbox = df_int_to_float(inbox)
@@ -122,7 +124,7 @@ def get_inbox():
 
 # Get list of regions
 def get_all_regions():
-    regions_temp = np.genfromtxt('./csv/Regions.csv', 
+    regions_temp = np.genfromtxt('./CSV/Regions.csv', 
                               delimiter=',',
                               dtype=('U5, U20'), 
                               names=True,
@@ -132,7 +134,7 @@ def get_all_regions():
 #Get hourly data
 def get_eia_data(region):
     eia_filename = f'{region}_master.csv'
-    csv_path = f'./csv/Eia_Hourly/latest/{eia_filename}'
+    csv_path = f'./CSV/Eia_Hourly/Latest/{eia_filename}'
 
     eia_csv = pd.read_csv(csv_path,
                          header=0, 
@@ -410,8 +412,8 @@ def add_output_year(
     return output_matrix
 
  # Save Output file.  Also called if minimizer error
-def output_close(output_matrix, inbox, region):   
-    outbox_path = './python/mailbox/outbox'
+def output_close(output_matrix, inbox, region, logf):   
+    outbox_path = './Python/Mailbox/Outbox'
     file_path = f'{outbox_path}/{inbox.at["Title", "Text"]}-{region}.csv'
     if os.path.exists(file_path):
         os.remove(file_path)
@@ -419,7 +421,7 @@ def output_close(output_matrix, inbox, region):
     # So rounding it to make that number 0.  Careful if you use really small numbers here.
     output_matrix_t = output_matrix.round(8).transpose()
     output_matrix_t.to_csv(file_path)
-
+    logf.close
 # Cost function used by minimizer
 def cost_function(     
                   MW_nrgs, 
@@ -537,7 +539,8 @@ def solve_this(
                molten_max,
                expensive,      
                zero_nrgs,
-               year):   
+               year,
+               logf):   
                
     knobs_nrgs = pd.Series(knobs, index=nrgs, dtype=float)
 
@@ -552,13 +555,14 @@ def solve_this(
     
     if (debug_unexpected_change):
         # These should start the same for all calls to solve_this in one year
-        print(new_hourly_nrgs.at[1234,'Solar'], \
-              new_supply_MWh_nrgs['Wind'],      \
-              new_MW_nrgs['Nuclear'],           \
-              new_hourly_nrgs.sum(),            \
-              new_battery_stored,
-              new_molten_stored,
-              new_molten_max)
+        double_print(new_hourly_nrgs.at[1234,'Solar'] + '\n' + 
+              new_supply_MWh_nrgs['Wind'] + '\n' +      
+              new_MW_nrgs['Nuclear'] + '\n' +           
+              new_hourly_nrgs.sum() + '\n' +            
+              new_battery_stored + '\n' +
+              new_molten_stored + '\n' +
+              new_molten_max,
+              logf)
     
     new_hourly_nrgs,     \
     new_demand_MWh_nrgs, \
@@ -628,7 +632,8 @@ def run_minimizer(
                   inbox,
                   region,
                   output_matrix,
-                  year):
+                  year,
+                  logf):
     
     #This is total energy produced - Storage is excluded to prevent double-counting
     # Also note that MW_nrgs['*_Storage'] units are actually MWh of capacity.  Not even compatable.
@@ -673,9 +678,9 @@ def run_minimizer(
             call_time = time.time()
             knobs = pd.Series(knobs_nrgs).values
             if(debug_minimizer):
-                print(f'Start Knobs = {knobs}')
-                print(f'Max Knobs = {max_add_nrgs}')
-                print(bnds)
+                double_print(f'Start Knobs = {knobs}',logf)
+                double_print(f'Max Knobs = {max_add_nrgs}',logf)
+                double_print(bnds,logf)
                 
             if(debug_step_minimizer):
                 row_debug = len(debug_matrix)
@@ -703,7 +708,8 @@ def run_minimizer(
                             molten_max,
                             expensive,               
                             zero_nrgs,
-                            year
+                            year,
+                            logf
                            ),
                         bounds=bnds,                  
                         method=method, 
@@ -717,15 +723,14 @@ def run_minimizer(
             end_time = time.time() 
         
             if not(results.success):
-                print('***************** Minimizer Failed ********************')
-                msgbox('Minimizer Failure', f'{results.message}, {inbox.at["Title", "Text"]}, {region}' , 1)
-                print(results)
-                output_close(output_matrix, inbox, region)
+                double_print('***************** Minimizer Failed ********************', logf)
+                double_print(results, logf)
+                output_close(output_matrix, inbox, region, logf)
                 raise RuntimeError('Minimizer Failure' )
             elif(debug_minimizer):
-                print (f'fatol {fatol} xatol {xatol}')
-                print(f'Knobs  {results.x}')
-                print(f'Results {results.fun:,.3f} Time {end_time - call_time:,.2f} with {results.nfev} runs')
+                 double_print (f'fatol {fatol} xatol {xatol}',logf)
+                 double_print(f'Knobs  {results.x}',logf)
+                 double_print(f'Results {results.fun:,.3f} Time {end_time - call_time:,.2f} with {results.nfev} runs',logf)
                 
             knobs      = results.x
             knobs_nrgs = pd.Series(knobs, index=nrgs, dtype=float)   
@@ -734,7 +739,7 @@ def run_minimizer(
                 opt_done = True
             else:
                 if(last_result > 0):
-                    print('Extra try at minimizer')
+                     double_print('Extra try at minimizer',logf)
                 last_result = results.fun
                 fatol       = fatol/10.
                 xatol       = xatol/10.
@@ -757,10 +762,12 @@ def do_region(region):
  
     hourly_nrgs, hourly_others = get_eia_data(region) 
     # If there is old data there, remove it
-    outbox_path = './python/mailbox/outbox'    
+    outbox_path = './Python/Mailbox/Outbox'    
     file_path = f'{outbox_path}/{inbox.at["Title", "Text"]}-{region}.csv'
+    log_file_path = f'{outbox_path}/{inbox.at["Title", "Text"]}-{region}-log.txt'
     if os.path.exists(file_path):
         os.remove(file_path)
+    logf = open(log_file_path, "w")
     
     MW_nrgs         = pd.Series(0,index=nrgs, dtype=float)
     supply_MWh_nrgs = pd.Series(0,index=nrgs, dtype=float)
@@ -816,7 +823,7 @@ def do_region(region):
     knobs_nrgs = init_knobs(tweaked_globals=tweaked_globals, tweaked_nrgs=tweaked_nrgs)                
                                     
     for year in range(1, int(years)+1):
-        print(f'Year {year} in {region}')
+        double_print(f'Year {year} in {region}', logf)
 # Update prices                       
         tweaked_globals, tweaked_nrgs = \
             fig_tweaks (
@@ -846,7 +853,8 @@ def do_region(region):
                             inbox           = inbox,
                             region          = region,
                             output_matrix   = output_matrix,
-                            year            = year)
+                            year            = year,
+                            logf            = logf)
                      
         after_optimize = True
 # Update data based on optimized knobs 
@@ -896,11 +904,11 @@ def do_region(region):
               target_hourly   = target_hourly)
         
     # End of years for loop
-    output_close(output_matrix, inbox, region)
+    output_close(output_matrix, inbox, region, logf)
     if (debug_step_minimizer or debug_final_run):
         save_debug(debug_filename, output_matrix)
         save_debug(debug_filename + '_knobs', knobs_nrgs)
-    print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes')
+    double_print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes', logf)
     
 # Copied from Stack Overflow:
 
@@ -928,9 +936,14 @@ class Process(mp.Process):
 def main():
     inbox         = get_inbox()
     region        = inbox.at['Region', 'Text']
-    print('Starting ', inbox.at['Title', 'Text'])
+    outbox_path   = './Python/Mailbox/Outbox'
+    log_file_path = f'{outbox_path}/{inbox.at["Title", "Text"]}-main-log.txt'
+    if os.path.exists(log_file_path):
+        os.remove(log_file_path)
+    logf = open(log_file_path, "w")
     
-        
+    double_print('Starting ' + ' ' + inbox.at['Title', 'Text'], logf)
+           
     if (not kill_parallel) and (region == 'US'):
         regions = get_all_regions()
         region_process = pd.Series(0,index=regions,dtype=object)
@@ -944,12 +957,11 @@ def main():
     # Now, wait for all of them to be done
             region_process[region].join()
             if(region_process[region].exception):
-                error, traceback = region_process[region].exception
-                print (region, inbox.at['Title', 'Text'], 'Error')
-                msgbox("Process Error", f"{region} {inbox.at['Title', 'Text']} Error", 1)
-                print(traceback)
+               error, traceback = region_process[region].exception
+               double_print (region + ' ' + inbox.at['Title', 'Text'] + ' Error = ' + error, logf)
+               double_print(traceback, logf)
             else:
-                print(region, ' Done')
+                double_print(region + ' Done', logf)
                 
     # kill_parallel True or not 'US'
     elif region == 'US':
@@ -960,6 +972,7 @@ def main():
     else: 
         do_region(region)
         
+    logf.close    
 if __name__ == '__main__':
     main()
 
