@@ -1,4 +1,5 @@
-ex/ Swap nrg, 'xyz_abc' ; \w includes underline
+ex/ Swap nrg, 'xyz_abc' in .at[nrg, 'xyz_abc']  
+note that \w includes underline
 \.at\[nrg, *('\w*')
 .at[$1, nrg
 
