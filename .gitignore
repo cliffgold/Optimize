@@ -5,6 +5,9 @@ Python-OldGIT/
 Results/
 Python/.vs/
 Python/Mailbox/Outbox/*
+Library/Debug*
+
+#excel temp files
 **/~$*
 
 /csv/Eia_Hourly/Previous
