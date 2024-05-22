@@ -414,14 +414,18 @@ def add_output_year(
  # Save Output file.  Also called if minimizer error
 def output_close(output_matrix, inbox, region, logf):   
     outbox_path = './Python/Mailbox/Outbox'
-    file_path = f'{outbox_path}/{inbox.at["Title", "Text"]}-{region}.csv'
+    file_path = f'{outbox_path}/{inbox.at["SubDir", "Text"]}-{region}.csv'
     if os.path.exists(file_path):
         os.remove(file_path)
     # minimized returned a really really small number for outage.  Excel couldn't handle it.
     # So rounding it to make that number 0.  Careful if you use really small numbers here.
     output_matrix_t = output_matrix.round(8).transpose()
     output_matrix_t.to_csv(file_path)
+    logf_file_path = os.path.abspath(logf.name)
     logf.close
+    if os.path.getsize(logf_file_path) == 0:
+        os.remove(logf_file_path)
+    
 # Cost function used by minimizer
 def cost_function(     
                   MW_nrgs, 
@@ -723,7 +727,7 @@ def run_minimizer(
             end_time = time.time() 
         
             if not(results.success):
-                double_print('***************** Minimizer Failed ********************', logf)
+                logf = double_print('***************** Minimizer Failed ********************', logf)
                 double_print(results, logf)
                 output_close(output_matrix, inbox, region, logf)
                 raise RuntimeError('Minimizer Failure' )
@@ -739,7 +743,7 @@ def run_minimizer(
                 opt_done = True
             else:
                 if(last_result > 0):
-                     double_print('Extra try at minimizer',logf)
+                     print('Extra try at minimizer')
                 last_result = results.fun
                 fatol       = fatol/10.
                 xatol       = xatol/10.
@@ -763,11 +767,13 @@ def do_region(region):
     hourly_nrgs, hourly_others = get_eia_data(region) 
     # If there is old data there, remove it
     outbox_path = './Python/Mailbox/Outbox'    
-    file_path = f'{outbox_path}/{inbox.at["Title", "Text"]}-{region}.csv'
-    log_file_path = f'{outbox_path}/{inbox.at["Title", "Text"]}-{region}-log.txt'
-    if os.path.exists(file_path):
-        os.remove(file_path)
-    logf = open(log_file_path, "w")
+    file_path = f'{outbox_path}/{inbox.at["SubDir", "Text"]}-{region}.csv'
+    log_file_path = f'{outbox_path}/{inbox.at["SubDir", "Text"]}-{region}-log.txt'
+    if os.path.exists(log_file_path):
+        os.remove(log_file_path)
+    with open(log_file_path, "w") as logf:
+        pass
+
     
     MW_nrgs         = pd.Series(0,index=nrgs, dtype=float)
     supply_MWh_nrgs = pd.Series(0,index=nrgs, dtype=float)
@@ -823,7 +829,7 @@ def do_region(region):
     knobs_nrgs = init_knobs(tweaked_globals=tweaked_globals, tweaked_nrgs=tweaked_nrgs)                
                                     
     for year in range(1, int(years)+1):
-        double_print(f'Year {year} in {region}', logf)
+        print(f'Year {year} in {region}')
 # Update prices                       
         tweaked_globals, tweaked_nrgs = \
             fig_tweaks (
@@ -908,7 +914,7 @@ def do_region(region):
     if (debug_step_minimizer or debug_final_run):
         save_debug(debug_filename, output_matrix)
         save_debug(debug_filename + '_knobs', knobs_nrgs)
-    double_print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes', logf)
+    print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes')
     
 # Copied from Stack Overflow:
 
@@ -937,12 +943,15 @@ def main():
     inbox         = get_inbox()
     region        = inbox.at['Region', 'Text']
     outbox_path   = './Python/Mailbox/Outbox'
-    log_file_path = f'{outbox_path}/{inbox.at["Title", "Text"]}-main-log.txt'
+    log_file_path = f'{outbox_path}/{inbox.at["SubDir", "Text"]}-main-log.txt'
     if os.path.exists(log_file_path):
         os.remove(log_file_path)
-    logf = open(log_file_path, "w")
+    with open(log_file_path, "w") as logf:
+        pass
+
+
     
-    double_print('Starting ' + ' ' + inbox.at['Title', 'Text'], logf)
+    print('Starting ' + ' ' + inbox.at['SubDir', 'Text'])
            
     if (not kill_parallel) and (region == 'US'):
         regions = get_all_regions()
@@ -957,11 +966,11 @@ def main():
     # Now, wait for all of them to be done
             region_process[region].join()
             if(region_process[region].exception):
-               error, traceback = region_process[region].exception
-               double_print (region + ' ' + inbox.at['Title', 'Text'] + ' Error = ' + error, logf)
-               double_print(traceback, logf)
+                error, traceback = region_process[region].exception
+                double_print (region + ' ' + inbox.at['SubDir', 'Text'] + ' Error = ' + error, logf)
+                double_print(traceback, logf)
             else:
-                double_print(region + ' Done', logf)
+                print(region + ' Done')
                 
     # kill_parallel True or not 'US'
     elif region == 'US':
@@ -972,7 +981,11 @@ def main():
     else: 
         do_region(region)
         
-    logf.close    
+    logf_file_path = os.path.abspath(logf.name)
+    logf.close
+    if os.path.getsize(logf_file_path) == 0:
+        os.remove(logf_file_path)
+        
 if __name__ == '__main__':
     main()
 
