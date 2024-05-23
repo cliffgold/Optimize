@@ -1,11 +1,11 @@
 ,Text,Initial,Yearly
-Date,45423,,
-Time,45423.58183,,
-Directory,Debug-2024-05-11a,,
-Title,Increasing_CO2,,
+Date,45434,,
+Time,45434.72748,,
+Directory,Cheap_Nuclear,,
+SubDir,Half_Capital,,
 Region,US,,
-Years,,3,
-CO2_Price,,10,10
+Years,,27,
+CO2_Price,,30,30
 Molten_Rate,,0,1
 Interest,,0.12,1
 Demand,,1.02,1
