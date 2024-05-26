@@ -231,6 +231,7 @@ def fig_gas_and_storage(needed_hourly,
                         supply_MWh_nrgs,
                         tweaked_globals,
                         after_optimize, 
+                        supercharge,
                         year):
     # This is for debugging.  Want final run of each year.
     if(after_optimize):
@@ -241,83 +242,236 @@ def fig_gas_and_storage(needed_hourly,
     outage_MWh   = 0.
     excess       = 0.
     hour         = 0.
-            
-
-    for hour_of_need in needed_hourly:
-        # Enough gas for everybody - most common, does it help to go first?
-        if (hour_of_need <= gas_max) and (hour_of_need >= 0):
-            path = 'Enough_Gas'
-            gas_used += hour_of_need
-            
-        #Already have too much NRG
-        elif(hour_of_need < 0):
-            path              = "Excess"
-            chargeable_molten = min(molten_max - molten_stored, nuclear_hourly[hour])
-            # Can excess be used to charge molten, with some left over?
-            if (-hour_of_need >= chargeable_molten):
-                molten_stored               = molten_max
-                supply_MWh_nrgs['Nuclear'] -= chargeable_molten
-                hour_of_need               += chargeable_molten
-                # Nothing added to excess
-            # No, none left over.  Molten will take it all
-            else:
-                molten_stored              += -hour_of_need
-                supply_MWh_nrgs['Nuclear'] -= -hour_of_need
-                hour_of_need                = 0.
-            # Can battery take all the remaining excess, with some left over?    
-            if (-hour_of_need > battery_max - battery_stored):
-                battery_stored = battery_max
-                excess        += -hour_of_need - (battery_max - battery_stored)
-            # No, battery will take the rest
-            else:
-                battery_stored += -hour_of_need
-                # nothing added to excess
-        # Enough gas + molten to meet need
-        elif (hour_of_need < gas_max + molten_stored):
-            path           = 'Use_Molten'
-            gas_used      += gas_max
-            molten_stored -= hour_of_need - gas_max
-            molten_used   += hour_of_need - gas_max
-            
-        # Enough gas + molten + battery to meet need
-        elif (hour_of_need < gas_max + molten_stored + battery_stored):
-            path             = 'Use_Molten+Battery'
-            gas_used        += gas_max
-            molten_used     += molten_stored
-            battery_stored  -= hour_of_need - gas_max - molten_stored
-            battery_used    += hour_of_need - gas_max - molten_stored
-            molten_stored    = 0.
-            
-        # Not enough to meet need
+    # Separate cases for each for loop    
+    if (molten_max > 0):
+        if (supercharge):
+            # Case of Molten with Supercharge  
+            for hour_of_need in needed_hourly:
+                #Already have too much NRG
+                chargeable_molten = min(molten_max - molten_stored, nuclear_hourly[hour])
+                if(hour_of_need < 0):
+                    path                        = 'Molt + Super - Excess'
+                    # How much can molten take?
+                    molten_chargeable           = min(molten_max - molten_stored, nuclear_hourly[hour])
+                    molten_charge               = min(molten_chargeable, -hour_of_need)
+                    molten_stored              += molten_charge
+                    supply_MWh_nrgs['Nuclear'] -= molten_charge
+                    hour_of_need               += molten_charge
+                    # Can battery take all the remaining excess
+                    battery_charge              = min(battery_max - battery_stored, -hour_of_need)
+                    excess                     += -hour_of_need - battery_charge
+                        
+                 # Enough gas for everybody - most common, does it help to go first?
+                elif (hour_of_need <= gas_max):
+                    path      = 'Molt + Super - Enough_Gas'
+                    gas_used += hour_of_need
+                    gas_left = gas_max - hour_of_need
+                    battery_stored += min(battery_max-battery_stored, gas_left)
+                    
+               # Enough gas + molten to meet need
+                elif (hour_of_need < gas_max + molten_stored):
+                    path           = 'Molt + Super - Use_Molten'
+                    gas_used      += gas_max
+                    molten_stored -= hour_of_need - gas_max
+                    molten_used   += hour_of_need - gas_max
+                    
+                # Enough gas + molten + battery to meet need
+                elif (hour_of_need < gas_max + molten_stored + battery_stored):
+                    path             = 'Molt + Super - Use_Molten+Battery'
+                    gas_used        += gas_max
+                    molten_used     += molten_stored
+                    battery_stored  -= hour_of_need - gas_max - molten_stored
+                    battery_used    += hour_of_need - gas_max - molten_stored
+                    molten_stored    = 0.
+                    
+                # Not enough to meet need
+                else:
+                    path           = 'Molt + Super - UhOh'
+                    outage_MWh    += hour_of_need - gas_max - battery_stored - molten_stored        
+                    gas_used      += gas_max
+                    battery_used  += battery_stored
+                    molten_used   += molten_stored
+                    battery_stored = 0.
+                    molten_stored  = 0.
+                                    
+                if(debug_final_run and after_optimize):
+                    row_debug_matrix = len(debug_matrix)
+                    
+                    debug_matrix.at[row_debug_matrix, 'Year']           = year
+                    debug_matrix.at[row_debug_matrix, 'Path']           = path
+                    debug_matrix.at[row_debug_matrix, 'Hour_of_Need']   = hour_of_need
+                    debug_matrix.at[row_debug_matrix, 'Gas_Max']        = gas_max
+                    debug_matrix.at[row_debug_matrix, 'Gas_Used']       = gas_used
+                    debug_matrix.at[row_debug_matrix, 'Battery_Max']    = battery_max
+                    debug_matrix.at[row_debug_matrix, 'Battery_Used']   = battery_used
+                    debug_matrix.at[row_debug_matrix, 'Battery_Stored'] = battery_stored
+                    debug_matrix.at[row_debug_matrix, 'Excess']         = excess
+               
         else:
-            path           = 'UhOh'
-            outage_MWh    += hour_of_need - gas_max - battery_stored - molten_stored        
-            gas_used      += gas_max
-            battery_used  += battery_stored
-            molten_used   += molten_stored
-            battery_stored = 0.
-            molten_stored  = 0.
-            
-        hour = hour + 1
-        if(debug_final_run and after_optimize):
-            row_debug_matrix = len(debug_matrix)
-            
-            debug_matrix.at[row_debug_matrix, 'Year']           = year
-            debug_matrix.at[row_debug_matrix, 'Path']           = path
-            debug_matrix.at[row_debug_matrix, 'Hour_of_Need']   = hour_of_need
-            debug_matrix.at[row_debug_matrix, 'Gas_Max']        = gas_max
-            debug_matrix.at[row_debug_matrix, 'Gas_Used']       = gas_used
-            debug_matrix.at[row_debug_matrix, 'Battery_Max']    = battery_max
-            debug_matrix.at[row_debug_matrix, 'Battery_Used']   = battery_used
-            debug_matrix.at[row_debug_matrix, 'Battery_Stored'] = battery_stored
-            debug_matrix.at[row_debug_matrix, 'Excess']         = excess
+            # Case of Molten without Supercharge  
+            for hour_of_need in needed_hourly:
+                #Already have too much NRG
+                chargeable_molten = min(molten_max - molten_stored, nuclear_hourly[hour])
+                if(hour_of_need < 0):
+                    path                        = 'Molten - Excess'
+                    # How much can molten take?
+                    molten_chargeable           = min(molten_max - molten_stored, nuclear_hourly[hour])
+                    molten_charge               = min(molten_chargeable, -hour_of_need)
+                    molten_stored              += molten_charge
+                    supply_MWh_nrgs['Nuclear'] -= molten_charge
+                    hour_of_need               += molten_charge
+                    # Can battery take all the remaining excess
+                    battery_charge              = min(battery_max - battery_stored, -hour_of_need)
+                    excess                     += -hour_of_need - battery_charge
+                        
+                 # Enough gas for everybody - most common, does it help to go first?
+                elif (hour_of_need <= gas_max):
+                    path = 'Molten - Enough_Gas'
+                    gas_used += hour_of_need
+                    
+               # Enough gas + molten to meet need
+                elif (hour_of_need < gas_max + molten_stored):
+                    path           = 'Molten - Use_Molten'
+                    gas_used      += gas_max
+                    molten_stored -= hour_of_need - gas_max
+                    molten_used   += hour_of_need - gas_max
+                    
+                # Enough gas + molten + battery to meet need
+                elif (hour_of_need < gas_max + molten_stored + battery_stored):
+                    path             = 'Molten - Use_Molten+Battery'
+                    gas_used        += gas_max
+                    molten_used     += molten_stored
+                    battery_stored  -= hour_of_need - gas_max - molten_stored
+                    battery_used    += hour_of_need - gas_max - molten_stored
+                    molten_stored    = 0.
+                    
+                # Not enough to meet need
+                else:
+                    path           = 'Molten - UhOh'
+                    outage_MWh    += hour_of_need - gas_max - battery_stored - molten_stored        
+                    gas_used      += gas_max
+                    battery_used  += battery_stored
+                    molten_used   += molten_stored
+                    battery_stored = 0.
+                    molten_stored  = 0.
+                                    
+                if(debug_final_run and after_optimize):
+                    row_debug_matrix = len(debug_matrix)
+                    
+                    debug_matrix.at[row_debug_matrix, 'Year']           = year
+                    debug_matrix.at[row_debug_matrix, 'Path']           = path
+                    debug_matrix.at[row_debug_matrix, 'Hour_of_Need']   = hour_of_need
+                    debug_matrix.at[row_debug_matrix, 'Gas_Max']        = gas_max
+                    debug_matrix.at[row_debug_matrix, 'Gas_Used']       = gas_used
+                    debug_matrix.at[row_debug_matrix, 'Battery_Max']    = battery_max
+                    debug_matrix.at[row_debug_matrix, 'Battery_Used']   = battery_used
+                    debug_matrix.at[row_debug_matrix, 'Battery_Stored'] = battery_stored
+                    debug_matrix.at[row_debug_matrix, 'Excess']         = excess
+
+    else:
+        if (supercharge):
+            # Case if No molten, with supercharge
+            for hour_of_need in needed_hourly:
+                #Already have too much NRG
+                if(hour_of_need < 0):
+                    path              = 'Super - Excess'
+                    # Can battery take all the remaining excess, with some left over?
+                    battery_charge = min(battery_max - battery_stored, -hour_of_need)
+                    battery_stored += battery_charge
+                    excess         += -excess - battery_charge
+                        
+                 # Enough gas for everybody - most common, does it help to go first?
+                elif (hour_of_need <= gas_max):
+                    path = 'Super - Enough_Gas'
+                    gas_used += hour_of_need
+                    battery_charge = min(battery_max - battery_stored, gas_max - hour_of_need)
+                    battery_stored += battery_charge                    
+                    
+                # Enough gas + battery to meet need
+                elif (hour_of_need < gas_max + battery_stored):
+                    path             = 'Super - Use_Battery'
+                    gas_used        += gas_max
+                    battery_stored  -= hour_of_need - gas_max
+                    battery_used    += hour_of_need - gas_max
+                    molten_stored    = 0.
+                    
+                # Not enough to meet need
+                else:
+                    path           = 'Super - UhOh'
+                    outage_MWh    += hour_of_need - gas_max - battery_stored - molten_stored        
+                    gas_used      += gas_max
+                    battery_used  += battery_stored
+                    molten_used   += molten_stored
+                    battery_stored = 0.
+                    molten_stored  = 0.
+                    
+                if(debug_final_run and after_optimize):
+                    row_debug_matrix = len(debug_matrix)
+                    
+                    debug_matrix.at[row_debug_matrix, 'Year']           = year
+                    debug_matrix.at[row_debug_matrix, 'Path']           = path
+                    debug_matrix.at[row_debug_matrix, 'Hour_of_Need']   = hour_of_need
+                    debug_matrix.at[row_debug_matrix, 'Gas_Max']        = gas_max
+                    debug_matrix.at[row_debug_matrix, 'Gas_Used']       = gas_used
+                    debug_matrix.at[row_debug_matrix, 'Battery_Max']    = battery_max
+                    debug_matrix.at[row_debug_matrix, 'Battery_Used']   = battery_used
+                    debug_matrix.at[row_debug_matrix, 'Battery_Stored'] = battery_stored
+                    debug_matrix.at[row_debug_matrix, 'Excess']         = excess
+
+        else:
+            # Case if No molten, no supercharge
+            for hour_of_need in needed_hourly:
+                hour = hour + 1
+                #Already have too much NRG
+                if(hour_of_need < 0):
+                    path              = 'None - Excess'
+                    # Can battery take all the remaining excess, with some left over?
+                    battery_charge = min(battery_max - battery_stored, -hour_of_need)
+                    battery_stored += battery_charge
+                    excess         += -excess - battery_charge
+                        
+                 # Enough gas for everybody - most common, does it help to go first?
+                elif (hour_of_need <= gas_max):
+                    path = 'None - Enough_Gas'
+                    gas_used += hour_of_need
+                    
+                # Enough gas + battery to meet need
+                elif (hour_of_need < gas_max + battery_stored):
+                    path             = 'None - Use_Battery'
+                    gas_used        += gas_max
+                    battery_stored  -= hour_of_need - gas_max
+                    battery_used    += hour_of_need - gas_max
+                    molten_stored    = 0.
+                    
+                # Not enough to meet need
+                else:
+                    path           = 'None - UhOh'
+                    outage_MWh    += hour_of_need - gas_max - battery_stored - molten_stored        
+                    gas_used      += gas_max
+                    battery_used  += battery_stored
+                    molten_used   += molten_stored
+                    battery_stored = 0.
+                    molten_stored  = 0.
+                    
+                if(debug_final_run and after_optimize):
+                    row_debug_matrix = len(debug_matrix)
+                    
+                    debug_matrix.at[row_debug_matrix, 'Year']           = year
+                    debug_matrix.at[row_debug_matrix, 'Path']           = path
+                    debug_matrix.at[row_debug_matrix, 'Hour_of_Need']   = hour_of_need
+                    debug_matrix.at[row_debug_matrix, 'Gas_Max']        = gas_max
+                    debug_matrix.at[row_debug_matrix, 'Gas_Used']       = gas_used
+                    debug_matrix.at[row_debug_matrix, 'Battery_Max']    = battery_max
+                    debug_matrix.at[row_debug_matrix, 'Battery_Used']   = battery_used
+                    debug_matrix.at[row_debug_matrix, 'Battery_Stored'] = battery_stored
+                    debug_matrix.at[row_debug_matrix, 'Excess']         = excess
 
     supply_MWh_nrgs['Gas']     = gas_used     / sample_years
     supply_MWh_nrgs['Battery'] = battery_used / sample_years
     molten_used                = molten_used  / sample_years
     excess_MWh                 = excess       / sample_years
     outage_MWh                 = outage_MWh   / sample_years
-    
+   
     return supply_MWh_nrgs,     \
            outage_MWh,          \
            molten_stored,       \
@@ -464,6 +618,7 @@ def update_data(
                target_hourly, 
                zero_nrgs,
                after_optimize,
+               supercharge,
                year):    
     
     # This is for debugging.  Want final run of each year.
@@ -514,6 +669,7 @@ def update_data(
                 supply_MWh_nrgs = supply_MWh_nrgs,
                 tweaked_globals = tweaked_globals,
                 after_optimize  = after_optimize,
+                supercharge     = supercharge,
                 year            = year)  
           
     demand_MWh_nrgs = fig_excess(supply_MWh_nrgs, excess_MWh, after_optimize)
@@ -532,7 +688,7 @@ def update_data(
 # Main function used by minimizer              
 def solve_this(
                knobs,                   
-               hourly_nrgs,
+               hourly_nrgs,           
                MW_nrgs,
                supply_MWh_nrgs,
                battery_stored,       
@@ -543,6 +699,7 @@ def solve_this(
                molten_max,
                expensive,      
                zero_nrgs,
+               supercharge,
                year,
                logf):   
                
@@ -591,6 +748,7 @@ def solve_this(
                       target_hourly   = target_hourly,
                       zero_nrgs       = zero_nrgs,
                       after_optimize  = False,
+                      supercharge     = supercharge,
                       year            = year)
                                  
     cost = cost_function(
@@ -645,6 +803,7 @@ def run_minimizer(
     
     start_knobs  = pd.Series(1,index=nrgs, dtype=float)
     max_add_nrgs = pd.Series(1,index=nrgs, dtype=float)
+    supercharge  = inbox.at['SuperCharge', 'Initial']
     for nrg in nrgs:
         if nrg == 'Battery':
             # Nominal for Storage is always half of max.
@@ -712,6 +871,7 @@ def run_minimizer(
                             molten_max,
                             expensive,               
                             zero_nrgs,
+                            supercharge,
                             year,
                             logf
                            ),
@@ -727,7 +887,7 @@ def run_minimizer(
             end_time = time.time() 
         
             if not(results.success):
-                logf = double_print('***************** Minimizer Failed ********************', logf)
+                double_print('***************** Minimizer Failed ********************', logf)
                 double_print(results, logf)
                 output_close(output_matrix, inbox, region, logf)
                 raise RuntimeError('Minimizer Failure' )
@@ -773,7 +933,6 @@ def do_region(region):
         os.remove(log_file_path)
     with open(log_file_path, "w") as logf:
         pass
-
     
     MW_nrgs         = pd.Series(0,index=nrgs, dtype=float)
     supply_MWh_nrgs = pd.Series(0,index=nrgs, dtype=float)
@@ -888,6 +1047,7 @@ def do_region(region):
                     target_hourly   = target_hourly,
                     zero_nrgs       = zero_nrgs,
                     after_optimize  = after_optimize,
+                    supercharge     = inbox.at['SuperCharge', 'Initial'],
                     year            = year)
 
 # Output results of this year             
@@ -948,7 +1108,6 @@ def main():
         os.remove(log_file_path)
     with open(log_file_path, "w") as logf:
         pass
-
 
     
     print('Starting ' + ' ' + inbox.at['SubDir', 'Text'])
