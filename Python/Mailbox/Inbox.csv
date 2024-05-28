@@ -1,11 +1,11 @@
 ,Text,Initial,Yearly
-Date,45438,,
-Time,45438.57015,,
-Directory,Cheap_Nuclear,,
-SubDir,Three_Quarter_Cap,,
-Region,US,,
-Years,,27,
-CO2_Price,,30,30
+Date,45440,,
+Time,45440.58431,,
+Directory,Cheap_Nuclear,0,
+SubDir,Half_Cap,0,
+Region,US,0,
+Years,,27,0
+CO2_Price,,500,0
 SuperCharge,,0,0
 Molten_Rate,,0,1
 Interest,,0.12,1
@@ -20,7 +20,7 @@ Gas_Fixed,,1,1
 Gas_Lifetime,,1,1
 Gas_Max_PCT,,1,1
 Gas_Variable,,1,1
-Nuclear_Capital,,-0.25,0
+Nuclear_Capital,,0.5,1
 Nuclear_Fixed,,1,1
 Nuclear_Lifetime,,1,1
 Nuclear_Max_PCT,,1,1

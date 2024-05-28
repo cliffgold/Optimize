@@ -1110,7 +1110,9 @@ def main():
         pass
 
     
-    print('Starting ' + ' ' + inbox.at['SubDir', 'Text'])
+    print('Starting ' + ' ' + inbox.at['SubDir', 'Text'] + ' CO2-' \
+          + str(int(inbox.at['CO2_Price','Initial'])) + '_' 
+          + str(int(inbox.at['CO2_Price','Yearly'])))
            
     if (not kill_parallel) and (region == 'US'):
         regions = get_all_regions()
