@@ -1,5 +1,4 @@
-﻿from tkinter import messagebox
-import numpy as np
+﻿import numpy as np
 import pandas as pd
 import numpy_financial as npf
 from scipy.optimize import minimize, Bounds
@@ -104,7 +103,7 @@ def save_debug(file_name, matrix):
       
 # Get price, CO2 generated, etc for each nrg
 def get_specs_nrgs():
-    specs_nrgs = pd.read_csv('./CSV/Specs.csv',
+    specs_nrgs = pd.read_csv('./csv/Specs.csv',
                          header=0, 
                          skiprows=1, 
                          index_col=0)
@@ -124,7 +123,7 @@ def get_inbox():
 
 # Get list of regions
 def get_all_regions():
-    regions_temp = np.genfromtxt('./CSV/Regions.csv', 
+    regions_temp = np.genfromtxt('./csv/Regions.csv', 
                               delimiter=',',
                               dtype=('U5, U20'), 
                               names=True,
@@ -134,7 +133,7 @@ def get_all_regions():
 #Get hourly data
 def get_eia_data(region):
     eia_filename = f'{region}_master.csv'
-    csv_path = f'./CSV/Eia_Hourly/Latest/{eia_filename}'
+    csv_path = f'./csv/Eia_Hourly/Latest/{eia_filename}'
 
     eia_csv = pd.read_csv(csv_path,
                          header=0, 

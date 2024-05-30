@@ -5,6 +5,7 @@ Python-OldGIT/
 Results/
 Python/.vs/
 Python/Mailbox/Outbox/*
+!Python/Mailbox/Outbox/Holdme
 Library/Debug*
 
 #excel temp files
