@@ -51,22 +51,20 @@ if debug_one_case:
     one_case_nrgs = pd.read_csv('Analysis/debug_knobs.csv')
     one_case_nrgs.at[11, 'Gas'] = 1.0
     one_case_nrgs.at[11, 'Nuclear'] = 1.15
-#    debug_matrix = pd.DataFrame(columns=pd.Series(['Count', 'Hour of Need', 'Gas_MWh', 'Battery_MWh', 'Molten_MWh', 'Outage_MWh']))
-#    debug_filename = 'One_Case_No_Gas'
+    debug_matrix_columns = pd.Series(['Count', 'Hour of Need', 'Gas_MWh', 'Battery_MWh', 'Molten_MWh', 'Outage_MWh'])
 
 # True = print minimize results
 debug_minimizer = False
 
 # Print out on each step of the minimizer
-debug_step_minimizer = False
+debug_step_minimizer = True
 if debug_step_minimizer:
-    debug_step_params = pd.Series(['Year'])
+    debug_matrix_columns = pd.Series(['Year'])
     for nrg in nrgs:
-        debug_step_params = pd.concat([debug_step_params, pd.Series(['Knob_' + nrg])])
+        debug_matrix_columns = pd.concat([debug_matrix_columns, pd.Series(['Knob_' + nrg])])
 
-    debug_step_params = pd.concat([debug_step_params, pd.Series(['Outage', 'Cost'])])
-    debug_matrix      = pd.DataFrame(columns=debug_step_params)
-    debug_filename    = 'Debug_Step'
+    debug_matrix_columns    = pd.concat([debug_matrix_columns, pd.Series(['Outage', 'Cost'])])
+    debug_filename       = 'Debug_Step'
 
 
 # Print out numbers that should not change in each year
@@ -75,32 +73,33 @@ debug_unexpected_change = False
 # Save every hour in fig_gas_and_storage loop
 debug_final_run = False
 if debug_final_run:
-    debug_final_run_params = pd.Series(['Year', 'Path', 'Hour_of_Need', 'Gas_Max', 'Gas_Used', 
+    debug_matrix_columns = pd.Series(['Year', 'Path', 'Hour_of_Need', 'Gas_Max', 'Gas_Used', 
                                         'Battery_Max','Battery_Used', 'Excess'])
-    debug_matrix = pd.DataFrame(columns=debug_final_run_params)
     debug_filename = 'Debug_final_run'
-
-
-def double_print(message, logf):
-    print(message)
-    logf.write(message + '\n')
     
-def df_int_to_float(df):
-    list = df.select_dtypes(include=['int']).columns.tolist()
-    df[list] = df[list].astype(float) 
-    return df
+if(debug_one_case or debug_step_minimizer or debug_final_run):
+    debug_matrix = pd.DataFrame(columns=debug_matrix_columns)
 
+#******************** End of Globals ***************
+#
 def round_significant(x,sig):
     x = round(x, -int(floor(log10(abs(x))))+sig-1)
     return x
 
 # Save debug matrix
-def save_debug(file_name, matrix):
-   file_path = './Python/Mailbox/Outbox/' + file_name + '.csv'
-   if os.path.exists(file_path):
-       os.remove(file_path)
-   matrix.to_csv(file_path)
+def save_matrix(file_name, matrix):
+    if (matrix.size > 1):
+        file_path = './Python/Mailbox/Outbox/' + file_name + '.csv'
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        matrix.to_csv(file_path)
       
+def df_int_to_float(df):
+# Identify integer columns and convert them to float
+    int_cols = df.select_dtypes(include=['int']).columns
+    df[int_cols] = df[int_cols].astype(float)
+    return df
+
 # Get price, CO2 generated, etc for each nrg
 def get_specs_nrgs():
     specs_nrgs = pd.read_csv('./csv/Specs.csv',
@@ -232,9 +231,12 @@ def fig_gas_and_storage(needed_hourly,
                         after_optimize, 
                         supercharge,
                         year):
+    global debug_matrix
+    
     # This is for debugging.  Want final run of each year.
     if(after_optimize):
         break_me = 1
+    
     gas_used     = 0.
     battery_used = 0.
     molten_used  = 0.
@@ -242,8 +244,7 @@ def fig_gas_and_storage(needed_hourly,
     excess       = 0.
     hour         = 0.
     # Separate cases for each for loop    
-    if (molten_max > 0):
-        if (supercharge):
+    if (molten_max > 0 and supercharge):
             # Case of Molten with Supercharge  
             for hour_of_need in needed_hourly:
                 #Already have too much NRG
@@ -306,7 +307,7 @@ def fig_gas_and_storage(needed_hourly,
                     debug_matrix.at[row_debug_matrix, 'Battery_Stored'] = battery_stored
                     debug_matrix.at[row_debug_matrix, 'Excess']         = excess
                
-        else:
+    elif (molten_max > 0):
             # Case of Molten without Supercharge  
             for hour_of_need in needed_hourly:
                 #Already have too much NRG
@@ -367,8 +368,7 @@ def fig_gas_and_storage(needed_hourly,
                     debug_matrix.at[row_debug_matrix, 'Battery_Stored'] = battery_stored
                     debug_matrix.at[row_debug_matrix, 'Excess']         = excess
 
-    else:
-        if (supercharge):
+    elif (supercharge):
             # Case if No molten, with supercharge
             for hour_of_need in needed_hourly:
                 #Already have too much NRG
@@ -406,7 +406,7 @@ def fig_gas_and_storage(needed_hourly,
                     
                 if(debug_final_run and after_optimize):
                     row_debug_matrix = len(debug_matrix)
-                    
+                   
                     debug_matrix.at[row_debug_matrix, 'Year']           = year
                     debug_matrix.at[row_debug_matrix, 'Path']           = path
                     debug_matrix.at[row_debug_matrix, 'Hour_of_Need']   = hour_of_need
@@ -417,7 +417,7 @@ def fig_gas_and_storage(needed_hourly,
                     debug_matrix.at[row_debug_matrix, 'Battery_Stored'] = battery_stored
                     debug_matrix.at[row_debug_matrix, 'Excess']         = excess
 
-        else:
+    else:
             # Case if No molten, no supercharge
             for hour_of_need in needed_hourly:
                 hour = hour + 1
@@ -565,20 +565,14 @@ def add_output_year(
     return output_matrix
 
  # Save Output file.  Also called if minimizer error
-def output_close(output_matrix, inbox, region, logf):   
+def output_close(output_matrix, inbox, region):   
     outbox_path = './Python/Mailbox/Outbox'
-    file_path = f'{outbox_path}/{inbox.at["SubDir", "Text"]}-{region}.csv'
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    file_name = f'{inbox.at["SubDir", "Text"]}-{region}'
     # minimized returned a really really small number for outage.  Excel couldn't handle it.
     # So rounding it to make that number 0.  Careful if you use really small numbers here.
     output_matrix_t = output_matrix.round(8).transpose()
-    output_matrix_t.to_csv(file_path)
-    logf_file_path = os.path.abspath(logf.name)
-    logf.close
-    if os.path.getsize(logf_file_path) == 0:
-        os.remove(logf_file_path)
-    
+    save_matrix(file_name, output_matrix_t)
+
 # Cost function used by minimizer
 def cost_function(     
                   MW_nrgs, 
@@ -656,7 +650,8 @@ def update_data(
     molten_stored,       \
     battery_stored,      \
     molten_used,         \
-    excess_MWh         = \
+    excess_MWh           \
+        =                \
         fig_gas_and_storage(
                 needed_hourly   = needed_hourly,                   
                 nuclear_hourly  = hourly_nrgs['Nuclear'],
@@ -699,9 +694,9 @@ def solve_this(
                expensive,      
                zero_nrgs,
                supercharge,
-               year,
-               logf):   
+               year):   
                
+    global debug_matrix
     knobs_nrgs = pd.Series(knobs, index=nrgs, dtype=float)
 
 # Must make a separate copy of these.  Otherwise, Python modifies the original.
@@ -713,16 +708,15 @@ def solve_this(
     new_molten_stored   = molten_stored
     new_molten_max      = molten_max
     
-    if (debug_unexpected_change):
+    ####if (debug_unexpected_change):
         # These should start the same for all calls to solve_this in one year
-        double_print(new_hourly_nrgs.at[1234,'Solar'] + '\n' + 
-              new_supply_MWh_nrgs['Wind'] + '\n' +      
-              new_MW_nrgs['Nuclear'] + '\n' +           
-              new_hourly_nrgs.sum() + '\n' +            
-              new_battery_stored + '\n' +
-              new_molten_stored + '\n' +
-              new_molten_max,
-              logf)
+        #####double_print(new_hourly_nrgs.at[1234,'Solar'] + '\n' + 
+        #####      new_supply_MWh_nrgs['Wind'] + '\n' +      
+        #####      new_MW_nrgs['Nuclear'] + '\n' +           
+        #####      new_hourly_nrgs.sum() + '\n' +            
+        #####      new_battery_stored + '\n' +
+        #####      new_molten_stored + '\n' +
+        #####      new_molten_max)
     
     new_hourly_nrgs,     \
     new_demand_MWh_nrgs, \
@@ -759,7 +753,7 @@ def solve_this(
                outage_MWh      = outage_MWh,
                adj_zeros       = adj_zeros)
 
-    if (debug_step_minimizer):
+    if (debug_step_minimizer and year == 27):
         row_debug_matrix = len(debug_matrix)
         for nrg in nrgs:
             debug_matrix.at[row_debug_matrix, 'Knob_' + nrg]  = knobs_nrgs[nrg]
@@ -793,9 +787,9 @@ def run_minimizer(
                   inbox,
                   region,
                   output_matrix,
-                  year,
-                  logf):
+                  year):
     
+    global debug_matrix
     #This is total energy produced - Storage is excluded to prevent double-counting
     # Also note that MW_nrgs['*_Storage'] units are actually MWh of capacity.  Not even compatable.
     MW_total     = MW_nrgs.sum() - MW_nrgs['Battery']
@@ -834,17 +828,18 @@ def run_minimizer(
         xatol = .00001
         rerun = .01
         opt_done = False
+        try_count = 0
         last_result = 0.
         while(not(opt_done)):
             minimizer_failure = False
             call_time = time.time()
             knobs = pd.Series(knobs_nrgs).values
             if(debug_minimizer):
-                double_print(f'Start Knobs = {knobs}',logf)
-                double_print(f'Max Knobs = {max_add_nrgs}',logf)
-                double_print(bnds,logf)
+                debug_matrix = pd.concat(debug_matrix,pd.Series([f'Start Knobs = {knobs}']))
+                debug_matrix = pd.concat(debug_matrix,pd.Series([f'Max Knobs = {max_add_nrgs}']))
+                debug_matrix = pd.concat(debug_matrix,pd.Series([bnds]))
                 
-            if(debug_step_minimizer):
+            if(debug_step_minimizer and year == 27):
                 row_debug = len(debug_matrix)
                 debug_matrix.at[row_debug, 'Year'] = year * 100
                 for nrg in nrgs:
@@ -871,8 +866,7 @@ def run_minimizer(
                             expensive,               
                             zero_nrgs,
                             supercharge,
-                            year,
-                            logf
+                            year
                            ),
                         bounds=bnds,                  
                         method=method, 
@@ -886,15 +880,28 @@ def run_minimizer(
             end_time = time.time() 
         
             if not(results.success):
-                double_print('***************** Minimizer Failed ********************', logf)
-                double_print(results, logf)
-                output_close(output_matrix, inbox, region, logf)
+                print(f'{region} - Minimizer Failure')
+                print(results)
+                output_close(output_matrix, inbox, region)
+                results_dict = {
+                    'fun': [results.fun],
+                    'x': [results.x],
+                    'nit': [results.nit],
+                    'nfev': [results.nfev],
+                    'success': [results.success],
+                    'status': [results.status],
+                    'message': [results.message]
+                    } 
+                error_matrix = pd.DataFrame(results_dict)
+                save_matrix(f'Minimizer_Failure-{region}', error_matrix)
+                if (debug_one_case or debug_step_minimizer or debug_final_run):
+                    save_matrix(debug_filename, debug_matrix)
                 raise RuntimeError('Minimizer Failure' )
+            
             elif(debug_minimizer):
-                 double_print (f'fatol {fatol} xatol {xatol}',logf)
-                 double_print(f'Knobs  {results.x}',logf)
-                 double_print(f'Results {results.fun:,.3f} Time {end_time - call_time:,.2f} with {results.nfev} runs',logf)
-                
+                debug_matrix = pd.concat([debug_matrix, f'fatol {fatol} xatol {xatol}']) 
+                debug_matrix = pd.concat([debug_matrix, f'Knobs  {results.x}']) 
+                debug_matrix = pd.concat([debug_matrix, f'Results {results.fun:,.3f} Time {end_time - call_time:,.2f} with {results.nfev} runs']) 
             knobs      = results.x
             knobs_nrgs = pd.Series(knobs, index=nrgs, dtype=float)   
             if ((last_result > (results.fun * (1-rerun))) and \
@@ -902,7 +909,7 @@ def run_minimizer(
                 opt_done = True
             else:
                 if(last_result > 0):
-                     print('Extra try at minimizer')
+                     print(f'{region} - Extra try at minimizer')
                 last_result = results.fun
                 fatol       = fatol/10.
                 xatol       = xatol/10.
@@ -927,11 +934,6 @@ def do_region(region):
     # If there is old data there, remove it
     outbox_path = './Python/Mailbox/Outbox'    
     file_path = f'{outbox_path}/{inbox.at["SubDir", "Text"]}-{region}.csv'
-    log_file_path = f'{outbox_path}/{inbox.at["SubDir", "Text"]}-{region}-log.txt'
-    if os.path.exists(log_file_path):
-        os.remove(log_file_path)
-    with open(log_file_path, "w") as logf:
-        pass
     
     MW_nrgs         = pd.Series(0,index=nrgs, dtype=float)
     supply_MWh_nrgs = pd.Series(0,index=nrgs, dtype=float)
@@ -1017,8 +1019,7 @@ def do_region(region):
                             inbox           = inbox,
                             region          = region,
                             output_matrix   = output_matrix,
-                            year            = year,
-                            logf            = logf)
+                            year            = year)
                      
         after_optimize = True
 # Update data based on optimized knobs 
@@ -1069,10 +1070,9 @@ def do_region(region):
               target_hourly   = target_hourly)
         
     # End of years for loop
-    output_close(output_matrix, inbox, region, logf)
-    if (debug_step_minimizer or debug_final_run):
-        save_debug(debug_filename, output_matrix)
-        save_debug(debug_filename + '_knobs', knobs_nrgs)
+    output_close(output_matrix, inbox, region)
+    if (debug_one_case or debug_step_minimizer or debug_final_run):
+        save_matrix(debug_filename, debug_matrix)
     print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes')
     
 # Copied from Stack Overflow:
@@ -1102,12 +1102,6 @@ def main():
     inbox         = get_inbox()
     region        = inbox.at['Region', 'Text']
     outbox_path   = './Python/Mailbox/Outbox'
-    log_file_path = f'{outbox_path}/{inbox.at["SubDir", "Text"]}-main-log.txt'
-    if os.path.exists(log_file_path):
-        os.remove(log_file_path)
-    with open(log_file_path, "w") as logf:
-        pass
-
     
     print('Starting ' + ' ' + inbox.at['SubDir', 'Text'] + ' CO2-' \
           + str(int(inbox.at['CO2_Price','Initial'])) + '_' 
@@ -1126,9 +1120,13 @@ def main():
     # Now, wait for all of them to be done
             region_process[region].join()
             if(region_process[region].exception):
+                error_matrix = pd.Series([f'Main Error in {region}'])
                 error, traceback = region_process[region].exception
-                double_print (region + ' ' + inbox.at['SubDir', 'Text'] + ' Error = ' + error, logf)
-                double_print(traceback, logf)
+                error_matrix = pd.concat(error_matrix, pd.Series ([error]))
+                error_matrix = pd.concat(error_matrix, pd.Series ([traceback]))
+                save_matrix(f'Main_error-{region}', error_matrix)
+                print(f'error {error} in {region}')
+                print(traceback)
             else:
                 print(region + ' Done')
                 
@@ -1140,12 +1138,7 @@ def main():
                          
     else: 
         do_region(region)
-        
-    logf_file_path = os.path.abspath(logf.name)
-    logf.close
-    if os.path.getsize(logf_file_path) == 0:
-        os.remove(logf_file_path)
-        
+                
 if __name__ == '__main__':
     main()
 
