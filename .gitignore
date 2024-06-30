@@ -2,7 +2,7 @@ Analysis/
 History/
 Macro/Old/
 Python-OldGIT/
-Results/
+Results/Lib_Compare*
 Python/.vs/
 Python/Mailbox/Outbox/*
 !Python/Mailbox/Outbox/Holdme
