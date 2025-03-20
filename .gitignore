@@ -8,6 +8,7 @@ Python/Mailbox/Outbox/*
 !Python/Mailbox/Outbox/Holdme
 Library/Debug*
 Share/Share.zip
+csv/Eia_Hourly/Latest/*.csv
 
 #excel temp files
 **/~$*
