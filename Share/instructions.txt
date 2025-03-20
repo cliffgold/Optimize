@@ -1,4 +1,0 @@
-Download Zip file from: https://drive.google.com/file/d/1dj_LQ9Dd6DuAs33Gz1zZSK40r79_LtnV/view?usp=sharing
-Move the Share_xx-xx-xxx.zip file from download into your directory of choice
-Rightclick extract all
-Open "How-to.xlsx"
