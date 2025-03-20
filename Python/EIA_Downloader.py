@@ -2,6 +2,7 @@
 from concurrent.futures.process import EXTRA_QUEUED_CALLS
 from hmac import new
 import os
+from tkinter import END
 import requests
 import numpy as np
 import pandas as pd
@@ -36,6 +37,8 @@ def get_energy_df_from_api(region, api_energy_code, energy_source, password):
         url = f'https://api.eia.gov/v2/seriesid/EBA.{region}-ALL.NG.{api_energy_code}.HL?' \
             + f'api_key={password}&offset={len(df)+early_hours}&length={records_left}'
         
+        print(url)
+        END
         response = requests.get(url)
         json_str = response.json()
         data = json_str['response']['data']
