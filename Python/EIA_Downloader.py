@@ -62,7 +62,7 @@ def get_energy_df_from_api(
     
     df = pd.DataFrame()
     while df.shape[0] < total_num_records:
-    while len(df) < total_num_records:
+        
         # Relevant for API request, it only spills out 5000 entries each call
         records_left = min(total_num_records - df.shape[0], 5000)
         
@@ -77,10 +77,6 @@ def get_energy_df_from_api(
             )
         
         # Get the JSON file from API URL
-            + f'api_key={password}&offset={len(df)+early_hours}&length={records_left}'
-        
-        print(url)
-        END
         response = requests.get(url)
         json_file = response.json()
         
@@ -102,11 +98,11 @@ def get_energy_df_from_api(
     df['Date'] = df['Date'].dt.strftime("%Y%m%dT%H")
     
     # Type casting of megawatts: from str -> int64
-    
     df[energy_source] = df[energy_source].astype('int64')
     
     # Update on downloaded dataset
     print(energy_source + ' -- finished download')
+    
     return df
 
 def clean_energy(master_df):
