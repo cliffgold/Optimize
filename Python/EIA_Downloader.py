@@ -13,8 +13,7 @@ os.chdir(dirname + '\\..')
 
 # Start and end date and time of first and last entry
 first_hour_dt = dt.datetime(2020, 1, 1) # by default set to 12AM (midnight)
-# last_hour_dt = dt.datetime(dt.date.today().year - 1, 1, 1) # not need to specify time zone to UTC, it is by default dt.datetime(2020, 1, 2).isoformat(timespec='hours')
-last_hour_dt = dt.datetime(2020, 1, 2)
+last_hour_dt = dt.datetime(dt.date.today().year - 1, 1, 1) # not need to specify time zone to UTC, it is by default dt.datetime(2020, 1, 2).isoformat(timespec='hours')
 total_num_records = int((last_hour_dt - first_hour_dt).total_seconds() / 3600) # No. of records = total no. of hours
 
 def URL_constructor(
@@ -62,9 +61,8 @@ def get_energy_df_from_api(
     '''
     
     df = pd.DataFrame()
-    early_hours = 0
     while df.shape[0] < total_num_records:
-        
+    while len(df) < total_num_records:
         # Relevant for API request, it only spills out 5000 entries each call
         records_left = min(total_num_records - df.shape[0], 5000)
         
@@ -75,10 +73,14 @@ def get_energy_df_from_api(
             api_energy_code,
             first_hour_dt.isoformat(timespec='hours'),
             last_hour_dt.isoformat(timespec='hours'),
-            df.shape[0] + early_hours
+            df.shape[0]
             )
         
         # Get the JSON file from API URL
+            + f'api_key={password}&offset={len(df)+early_hours}&length={records_left}'
+        
+        print(url)
+        END
         response = requests.get(url)
         json_file = response.json()
         
@@ -100,14 +102,11 @@ def get_energy_df_from_api(
     df['Date'] = df['Date'].dt.strftime("%Y%m%dT%H")
     
     # Type casting of megawatts: from str -> int64
+    
     df[energy_source] = df[energy_source].astype('int64')
     
     # Update on downloaded dataset
     print(energy_source + ' -- finished download')
-    
-    # Update early hours
-    early_hours += df.shape[0]
-    
     return df
 
 def clean_energy(master_df):
