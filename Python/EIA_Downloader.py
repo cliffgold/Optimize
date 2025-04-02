@@ -4,7 +4,6 @@ import requests
 import numpy as np
 import pandas as pd
 import datetime as dt
-import math
 import shutil as sh
 
 # Global read-only constants
@@ -13,8 +12,23 @@ os.chdir(dirname + '\\..')
 
 # Start and end date and time of first and last entry
 first_hour_dt = dt.datetime(2020, 1, 1) # by default set to 12AM (midnight)
-last_hour_dt = dt.datetime(dt.date.today().year - 1, 1, 1) # not need to specify time zone to UTC, it is by default dt.datetime(2020, 1, 2).isoformat(timespec='hours')
+last_hour_dt = dt.datetime(dt.date.today().year, 1, 1)
 total_num_records = int((last_hour_dt - first_hour_dt).total_seconds() / 3600) # No. of records = total no. of hours
+
+def check_missing_hours(df):
+    
+    check_missing = []
+    start_missing = []
+    for i in range(df['date'].shape[0] - 1):
+        current = dt.datetime.fromisoformat(df['date'][i])
+        next = dt.datetime.fromisoformat(df['date'][i+1])
+        delta_time = (next - current).total_seconds() / 3600
+        if delta_time > 1:
+            check_missing.append(delta_time)
+            start_missing.append(current)
+            
+    if len(check_missing) > 0:
+        print('Missing hours:\n', start_missing)
 
 def URL_constructor(
         password: str,
@@ -87,15 +101,17 @@ def get_energy_df_from_api(
             )
         
         # Rename columns and drop useless ones
-        tmp_df = tmp_df.rename(columns={'period': 'Date', 'value': energy_source}).drop(columns=['value-units'])
-        tmp_df = tmp_df[['Date', energy_source]]
+        tmp_df = tmp_df.rename(columns={'period': 'date', 'value': energy_source})
+        tmp_df = tmp_df[['date', energy_source]]
+        
+        check_missing_hours(tmp_df)
             
         # Concatenate the DataFrame adding the new entries
         df = pd.concat([df, tmp_df], ignore_index=True)
 
     # Format casting from ISO 8601 to 'YYMMDDTHH'
-    df['Date'] = pd.to_datetime(df['Date'], format="ISO8601")
-    df['Date'] = df['Date'].dt.strftime("%Y%m%dT%H")
+    df['date'] = pd.to_datetime(df['date'], format="ISO8601")
+    df['date'] = df['date'].dt.strftime("%Y%m%dT%H")
     
     # Type casting of megawatts: from str -> int64
     df[energy_source] = df[energy_source].astype('int64')
@@ -111,7 +127,7 @@ def clean_energy(master_df):
     Missing values are replaced with values from the same hour on the previous or next day (24-hour shift).
     
     Parameters:
-    master_df (pd.DataFrame): DataFrame containing energy data, including a 'Date' column.
+    master_df (pd.DataFrame): DataFrame containing energy data, including a 'date' column.
     
     Returns:
     pd.DataFrame: Cleaned DataFrame with missing values filled.
@@ -119,9 +135,9 @@ def clean_energy(master_df):
     
     print("Cleaning Values\n")
     
-    # Iterate over each column, skipping 'Date'
+    # Iterate over each column, skipping 'date'
     for nrg in master_df.columns:
-        if nrg != 'Date':  
+        if nrg != 'date':  
             filling = False  # Tracks whether we are in a filling sequence
             
             # Iterate over each row
@@ -199,18 +215,24 @@ def main(region_dict: dict[str]) -> None:
                 if master_df.empty:
                     master_df = energy_df
                 else:
-                    master_df = master_df.merge(energy_df, how='left', on='Date')
+                    master_df = master_df.merge(energy_df, how='left', on='date')
             else:
                 print(region, energy_source, "-- zero filled")
-                zeros_df = pd.DataFrame(0, index=np.arange(total_num_records+1), columns=['Date', energy_source])
+                zeros_df = pd.DataFrame(0, index=np.arange(total_num_records+1), columns=['date', energy_source])
                 master_df = pd.concat([master_df, zeros_df[energy_source]], axis = 1)
-                # master_df = master_df.merge(zeros_df, how='left', on='Date')
+                # master_df = master_df.merge(zeros_df, how='left', on='date')
         
         # Clean up the DataFrame in case of missing data
-        master_df = clean_energy(master_df)
+        master_df_clean = clean_energy(master_df)
+        
+        # Normalize master df
+        master_df_norm = pd.DataFrame([])
+        for col in master_df_clean.columns:
+            if col != 'date':
+                master_df_norm[col] = master_df_clean[col] / master_df_clean[col].max()
         
         # Dump data to a CSV file
-        master_df.to_csv(master_df_folder_path + master_df_file, index=False, sep=',')        
+        master_df_norm.to_csv(master_df_folder_path + master_df_file, index=False, sep=',')        
     
         file_list.append(master_df_folder_path + master_df_file)
     
