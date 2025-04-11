@@ -5,30 +5,19 @@ import numpy as np
 import pandas as pd
 import datetime as dt
 import shutil as sh
+from typing import List
 
 # Global read-only constants
 dirname, filename = os.path.split(os.path.abspath(__file__))
 os.chdir(dirname + '\\..')
 
-# Start and end date and time of first and last entry
-first_hour_dt = dt.datetime(2020, 1, 1) # by default set to 12AM (midnight)
-last_hour_dt = dt.datetime(dt.date.today().year, 1, 1)
-total_num_records = int((last_hour_dt - first_hour_dt).total_seconds() / 3600) # No. of records = total no. of hours
+# Length of API sub-query
+length_query = 5000
 
-def check_missing_hours(df):
+def init_master_df(first_hour_dt, total_num_records):
+    ''' Initialize the master dataframe with all the datetimes '''
     
-    check_missing = []
-    start_missing = []
-    for i in range(df['date'].shape[0] - 1):
-        current = dt.datetime.fromisoformat(df['date'][i])
-        next = dt.datetime.fromisoformat(df['date'][i+1])
-        delta_time = (next - current).total_seconds() / 3600
-        if delta_time > 1:
-            check_missing.append(delta_time)
-            start_missing.append(current)
-            
-    if len(check_missing) > 0:
-        print('Missing hours:\n', start_missing)
+    return pd.DataFrame({'date': [first_hour_dt + dt.timedelta(hours=i) for i in range(total_num_records)]})
 
 def URL_constructor(
         password: str,
@@ -47,26 +36,36 @@ def URL_constructor(
         f'start={first_hour}&' + \
         f'end={last_hour}&sort[0][column]=period&sort[0][direction]=asc&' + \
         f'offset={offset}&' + \
-        'length=5000'
+        f'length={length_query}'
 
 def get_energy_df_from_api(
+        first_hour_dt: dt.datetime,
+        last_hour_dt: dt.datetime,
+        total_num_records: int,
         region: str,
         api_energy_code: str,
         energy_source: str,
-        password: str) -> pd.DataFrame:
+        password: str,
+        datetimes: List[dt.datetime]) -> pd.DataFrame:
     '''
     This function fetches the energy data from the EIA API
 
     Parameters
     ----------
-    region : str
-        USA region.
+    first_hour_dt: dt.datetime
+        First datetime.
+    last_hour_dt: dt.datetime
+        Last datetime.
+    total_num_records : int
+        Total number of entries.
     api_energy_code : str
         Code used in the EIA API relative to energy source.
     energy_source : str
         Energy source.
     password : str
         Password to access API of EIA.
+    datetimes: List[dt.datetime]
+        List of datetimes from first to last hour
 
     Returns
     -------
@@ -74,11 +73,13 @@ def get_energy_df_from_api(
 
     '''
     
-    df = pd.DataFrame()
-    while df.shape[0] < total_num_records:
-        
-        # Relevant for API request, it only spills out 5000 entries each call
-        records_left = min(total_num_records - df.shape[0], 5000)
+    df = pd.DataFrame({
+        'date': datetimes,
+        energy_source: np.zeros(len(datetimes), dtype=np.int64)
+        })
+    current = 0
+    
+    while current < total_num_records:
         
         # Construct the API URL
         url = URL_constructor(
@@ -87,7 +88,7 @@ def get_energy_df_from_api(
             api_energy_code,
             first_hour_dt.isoformat(timespec='hours'),
             last_hour_dt.isoformat(timespec='hours'),
-            df.shape[0]
+            current
             )
         
         # Get the JSON file from API URL
@@ -104,17 +105,20 @@ def get_energy_df_from_api(
         tmp_df = tmp_df.rename(columns={'period': 'date', 'value': energy_source})
         tmp_df = tmp_df[['date', energy_source]]
         
-        check_missing_hours(tmp_df)
-            
-        # Concatenate the DataFrame adding the new entries
-        df = pd.concat([df, tmp_df], ignore_index=True)
+        # Type casting of megawatts: from str -> int64
+        tmp_df[energy_source] = tmp_df[energy_source].astype('int64')
+        
+        # Fill megawatt entry to corresponding datetime element
+        for dt_i, megaw_i in zip(tmp_df.date, tmp_df[energy_source]):
+            mask = df.date == dt_i
+            df.loc[mask, energy_source] = megaw_i
+        
+        # Update number of datetimes downloaded so far
+        current += length_query
 
     # Format casting from ISO 8601 to 'YYMMDDTHH'
     df['date'] = pd.to_datetime(df['date'], format="ISO8601")
     df['date'] = df['date'].dt.strftime("%Y%m%dT%H")
-    
-    # Type casting of megawatts: from str -> int64
-    df[energy_source] = df[energy_source].astype('int64')
     
     # Update on downloaded dataset
     print(energy_source + ' -- finished download')
@@ -166,6 +170,14 @@ def clean_energy(master_df):
 
 
 def main(region_dict: dict[str]) -> None:
+    
+    # Start and end date and time of first and last entry
+    first_hour_dt = dt.datetime(2020, 1, 1) # by default set to 12AM (midnight)
+    last_hour_dt = dt.datetime(dt.date.today().year, 1, 1)
+    
+    # Total number of entries = hours
+    total_num_records = int((last_hour_dt - first_hour_dt).total_seconds() / 3600) # No. of records = total no. of hours
+    
     file_list = []
     os.chdir("./csv/Eia_Hourly")
     master_df_folder_path = 'Latest/'
@@ -185,8 +197,8 @@ def main(region_dict: dict[str]) -> None:
     # Iterate over US States
     for region in region_dict.keys():
         
-        # Initialize empty pandas.DataFrame
-        master_df = pd.DataFrame()
+        # Initialize pandas.DataFrame with all the dates from first hour to last one
+        master_df = init_master_df(first_hour_dt, total_num_records)
         print(f'Starting region {region}\n')
         
         # File name of region-dependent master
@@ -206,20 +218,24 @@ def main(region_dict: dict[str]) -> None:
                 
                 # Get the megawatts produced hourly
                 energy_df = get_energy_df_from_api(
+                    first_hour_dt,
+                    last_hour_dt,
+                    total_num_records,
                     region,
                     api_energy_code,
                     energy_source,
-                    password)
+                    password,
+                    master_df.date)
                 
                 # Merge master df with the data of the next energy source
                 if master_df.empty:
                     master_df = energy_df
                 else:
-                    master_df = master_df.merge(energy_df, how='left', on='date')
+                    master_df = pd.concat([master_df, energy_df[energy_source]], axis = 1)
             else:
                 print(region, energy_source, "-- zero filled")
-                zeros_df = pd.DataFrame(0, index=np.arange(total_num_records+1), columns=['date', energy_source])
-                master_df = pd.concat([master_df, zeros_df[energy_source]], axis = 1)
+                zeros_df = pd.DataFrame(0, index=np.arange(total_num_records+1), columns=[energy_source])
+                master_df = pd.concat([master_df, zeros_df], axis = 1)
                 # master_df = master_df.merge(zeros_df, how='left', on='date')
         
         # Clean up the DataFrame in case of missing data
