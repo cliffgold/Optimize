@@ -73,6 +73,9 @@ def get_energy_df_from_api(
 
     '''
     
+    # Time the process
+    start = dt.datetime.today()
+    
     df = pd.DataFrame({
         'date': datetimes,
         energy_source: np.zeros(len(datetimes), dtype=np.int64)
@@ -115,13 +118,12 @@ def get_energy_df_from_api(
         
         # Update number of datetimes downloaded so far
         current += length_query
-
-    # Format casting from ISO 8601 to 'YYMMDDTHH'
-    df['date'] = pd.to_datetime(df['date'], format="ISO8601")
-    df['date'] = df['date'].dt.strftime("%Y%m%dT%H")
+    
+    # Time the process
+    delta_time = (dt.datetime.today() - start).total_seconds() / 60
     
     # Update on downloaded dataset
-    print(energy_source + ' -- finished download')
+    print(energy_source + f' -- finished download in {delta_time:.2f} minute(s)')
     
     return df
 
@@ -234,9 +236,12 @@ def main(region_dict: dict[str]) -> None:
                     master_df = pd.concat([master_df, energy_df[energy_source]], axis = 1)
             else:
                 print(region, energy_source, "-- zero filled")
-                zeros_df = pd.DataFrame(0, index=np.arange(total_num_records+1), columns=[energy_source])
+                zeros_df = pd.DataFrame(0, index=np.arange(total_num_records), columns=[energy_source])
                 master_df = pd.concat([master_df, zeros_df], axis = 1)
-                # master_df = master_df.merge(zeros_df, how='left', on='date')
+        
+        # Format casting from ISO 8601 to 'YYMMDDTHH'
+        master_df['date'] = pd.to_datetime(master_df['date'], format="ISO8601")
+        master_df['date'] = master_df['date'].dt.strftime("%Y%m%dT%H")
         
         # Clean up the DataFrame in case of missing data
         master_df_clean = clean_energy(master_df)
@@ -245,7 +250,11 @@ def main(region_dict: dict[str]) -> None:
         master_df_norm = pd.DataFrame([])
         for col in master_df_clean.columns:
             if col != 'date':
-                master_df_norm[col] = master_df_clean[col] / master_df_clean[col].max()
+                max_val = master_df_clean[col].max()
+                
+                # If max_val is not null
+                if max_val:
+                    master_df_norm[col] = master_df_clean[col] / max_val
         
         # Dump data to a CSV file
         master_df_norm.to_csv(master_df_folder_path + master_df_file, index=False, sep=',')        
