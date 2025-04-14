@@ -4,17 +4,20 @@ import requests
 import numpy as np
 import pandas as pd
 import datetime as dt
-import math
 import shutil as sh
+from typing import List
 
 # Global read-only constants
 dirname, filename = os.path.split(os.path.abspath(__file__))
 os.chdir(dirname + '\\..')
 
-# Start and end date and time of first and last entry
-first_hour_dt = dt.datetime(2020, 1, 1) # by default set to 12AM (midnight)
-last_hour_dt = dt.datetime(dt.date.today().year - 1, 1, 1) # not need to specify time zone to UTC, it is by default dt.datetime(2020, 1, 2).isoformat(timespec='hours')
-total_num_records = int((last_hour_dt - first_hour_dt).total_seconds() / 3600) # No. of records = total no. of hours
+# Length of API sub-query
+length_query = 5000
+
+def init_master_df(first_hour_dt, total_num_records):
+    ''' Initialize the master dataframe with all the datetimes '''
+    
+    return pd.DataFrame({'date': [first_hour_dt + dt.timedelta(hours=i) for i in range(total_num_records)]})
 
 def URL_constructor(
         password: str,
@@ -33,26 +36,36 @@ def URL_constructor(
         f'start={first_hour}&' + \
         f'end={last_hour}&sort[0][column]=period&sort[0][direction]=asc&' + \
         f'offset={offset}&' + \
-        'length=5000'
+        f'length={length_query}'
 
 def get_energy_df_from_api(
+        first_hour_dt: dt.datetime,
+        last_hour_dt: dt.datetime,
+        total_num_records: int,
         region: str,
         api_energy_code: str,
         energy_source: str,
-        password: str) -> pd.DataFrame:
+        password: str,
+        datetimes: List[dt.datetime]) -> pd.DataFrame:
     '''
     This function fetches the energy data from the EIA API
 
     Parameters
     ----------
-    region : str
-        USA region.
+    first_hour_dt: dt.datetime
+        First datetime.
+    last_hour_dt: dt.datetime
+        Last datetime.
+    total_num_records : int
+        Total number of entries.
     api_energy_code : str
         Code used in the EIA API relative to energy source.
     energy_source : str
         Energy source.
     password : str
         Password to access API of EIA.
+    datetimes: List[dt.datetime]
+        List of datetimes from first to last hour
 
     Returns
     -------
@@ -60,11 +73,16 @@ def get_energy_df_from_api(
 
     '''
     
-    df = pd.DataFrame()
-    while df.shape[0] < total_num_records:
-        
-        # Relevant for API request, it only spills out 5000 entries each call
-        records_left = min(total_num_records - df.shape[0], 5000)
+    # Time the process
+    start = dt.datetime.today()
+    
+    df = pd.DataFrame({
+        'date': datetimes,
+        energy_source: np.zeros(len(datetimes), dtype=np.int64)
+        })
+    current = 0
+    
+    while current < total_num_records:
         
         # Construct the API URL
         url = URL_constructor(
@@ -73,7 +91,7 @@ def get_energy_df_from_api(
             api_energy_code,
             first_hour_dt.isoformat(timespec='hours'),
             last_hour_dt.isoformat(timespec='hours'),
-            df.shape[0]
+            current
             )
         
         # Get the JSON file from API URL
@@ -87,21 +105,25 @@ def get_energy_df_from_api(
             )
         
         # Rename columns and drop useless ones
-        tmp_df = tmp_df.rename(columns={'period': 'Date', 'value': energy_source}).drop(columns=['value-units'])
-        tmp_df = tmp_df[['Date', energy_source]]
-            
-        # Concatenate the DataFrame adding the new entries
-        df = pd.concat([df, tmp_df], ignore_index=True)
-
-    # Format casting from ISO 8601 to 'YYMMDDTHH'
-    df['Date'] = pd.to_datetime(df['Date'], format="ISO8601")
-    df['Date'] = df['Date'].dt.strftime("%Y%m%dT%H")
+        tmp_df = tmp_df.rename(columns={'period': 'date', 'value': energy_source})
+        tmp_df = tmp_df[['date', energy_source]]
+        
+        # Type casting of megawatts: from str -> int64
+        tmp_df[energy_source] = tmp_df[energy_source].astype('int64')
+        
+        # Fill megawatt entry to corresponding datetime element
+        for dt_i, megaw_i in zip(tmp_df.date, tmp_df[energy_source]):
+            mask = df.date == dt_i
+            df.loc[mask, energy_source] = megaw_i
+        
+        # Update number of datetimes downloaded so far
+        current += length_query
     
-    # Type casting of megawatts: from str -> int64
-    df[energy_source] = df[energy_source].astype('int64')
+    # Time the process
+    delta_time = (dt.datetime.today() - start).total_seconds() / 60
     
     # Update on downloaded dataset
-    print(energy_source + ' -- finished download')
+    print(energy_source + f' -- finished download in {delta_time:.2f} minute(s)')
     
     return df
 
@@ -111,7 +133,7 @@ def clean_energy(master_df):
     Missing values are replaced with values from the same hour on the previous or next day (24-hour shift).
     
     Parameters:
-    master_df (pd.DataFrame): DataFrame containing energy data, including a 'Date' column.
+    master_df (pd.DataFrame): DataFrame containing energy data, including a 'date' column.
     
     Returns:
     pd.DataFrame: Cleaned DataFrame with missing values filled.
@@ -119,9 +141,9 @@ def clean_energy(master_df):
     
     print("Cleaning Values\n")
     
-    # Iterate over each column, skipping 'Date'
+    # Iterate over each column, skipping 'date'
     for nrg in master_df.columns:
-        if nrg != 'Date':  
+        if nrg != 'date':  
             filling = False  # Tracks whether we are in a filling sequence
             
             # Iterate over each row
@@ -150,6 +172,14 @@ def clean_energy(master_df):
 
 
 def main(region_dict: dict[str]) -> None:
+    
+    # Start and end date and time of first and last entry
+    first_hour_dt = dt.datetime(2020, 1, 1) # by default set to 12AM (midnight)
+    last_hour_dt = dt.datetime(dt.date.today().year, 1, 1)
+    
+    # Total number of entries = hours
+    total_num_records = int((last_hour_dt - first_hour_dt).total_seconds() / 3600) # No. of records = total no. of hours
+    
     file_list = []
     os.chdir("./csv/Eia_Hourly")
     master_df_folder_path = 'Latest/'
@@ -169,8 +199,8 @@ def main(region_dict: dict[str]) -> None:
     # Iterate over US States
     for region in region_dict.keys():
         
-        # Initialize empty pandas.DataFrame
-        master_df = pd.DataFrame()
+        # Initialize pandas.DataFrame with all the dates from first hour to last one
+        master_df = init_master_df(first_hour_dt, total_num_records)
         print(f'Starting region {region}\n')
         
         # File name of region-dependent master
@@ -190,27 +220,44 @@ def main(region_dict: dict[str]) -> None:
                 
                 # Get the megawatts produced hourly
                 energy_df = get_energy_df_from_api(
+                    first_hour_dt,
+                    last_hour_dt,
+                    total_num_records,
                     region,
                     api_energy_code,
                     energy_source,
-                    password)
+                    password,
+                    master_df.date)
                 
                 # Merge master df with the data of the next energy source
                 if master_df.empty:
                     master_df = energy_df
                 else:
-                    master_df = master_df.merge(energy_df, how='left', on='Date')
+                    master_df = pd.concat([master_df, energy_df[energy_source]], axis = 1)
             else:
                 print(region, energy_source, "-- zero filled")
-                zeros_df = pd.DataFrame(0, index=np.arange(total_num_records+1), columns=['Date', energy_source])
-                master_df = pd.concat([master_df, zeros_df[energy_source]], axis = 1)
-                # master_df = master_df.merge(zeros_df, how='left', on='Date')
+                zeros_df = pd.DataFrame(0, index=np.arange(total_num_records), columns=[energy_source])
+                master_df = pd.concat([master_df, zeros_df], axis = 1)
+        
+        # Format casting from ISO 8601 to 'YYMMDDTHH'
+        master_df['date'] = pd.to_datetime(master_df['date'], format="ISO8601")
+        master_df['date'] = master_df['date'].dt.strftime("%Y%m%dT%H")
         
         # Clean up the DataFrame in case of missing data
-        master_df = clean_energy(master_df)
+        master_df_clean = clean_energy(master_df)
+        
+        # Normalize master df
+        master_df_norm = pd.DataFrame([])
+        for col in master_df_clean.columns:
+            if col != 'date':
+                max_val = master_df_clean[col].max()
+                
+                # If max_val is not null
+                if max_val:
+                    master_df_norm[col] = master_df_clean[col] / max_val
         
         # Dump data to a CSV file
-        master_df.to_csv(master_df_folder_path + master_df_file, index=False, sep=',')        
+        master_df_norm.to_csv(master_df_folder_path + master_df_file, index=False, sep=',')        
     
         file_list.append(master_df_folder_path + master_df_file)
     
