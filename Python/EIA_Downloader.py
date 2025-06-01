@@ -5,7 +5,8 @@ import numpy as np
 import pandas as pd
 import datetime as dt
 import shutil as sh
-from typing import List
+from os.path import join
+from typing import List, Tuple
 
 # Global read-only constants
 dirname, filename = os.path.split(os.path.abspath(__file__))
@@ -14,11 +15,27 @@ os.chdir(dirname + '\\..')
 # Length of API sub-query
 length_query = 5000
 
+# Start and end date and time of first and last entry
+first_hour_dt = dt.datetime(2020, 1, 1) # by default set to 12AM (midnight)
+last_hour_dt = dt.datetime(dt.date.today().year, 1, 1)
+
 def init_master_df(first_hour_dt, total_num_records):
     ''' Initialize the master dataframe with all the datetimes '''
     
     return pd.DataFrame({'date': [first_hour_dt + dt.timedelta(hours=i) for i in range(total_num_records)]})
 
+def init_master_max_MWh(first_hour_dt, last_hour_dt):
+    ''' Initialize the pandas.DataFrame of maximum megawatthours '''
+    
+    # Number of years of collected data
+    no_years = int((last_hour_dt - first_hour_dt).total_seconds() / (365 * 24 * 3600))
+
+    return pd.DataFrame(
+        {
+            'years': [int(first_hour_dt.year) + i for i in range(no_years)]
+        }
+    )
+    
 def URL_constructor(
         password: str,
         region: str,
@@ -38,29 +55,27 @@ def URL_constructor(
         f'offset={offset}&' + \
         f'length={length_query}'
         
-def get_max_watthour(df, energy_source):
-    ''' Find the maximum watthours for each year ''' 
-    
-    # Get the first energy date
-    start_dt = df['date'].iloc[0]
-    end_dt = df['date'].iloc[-1]
-    
-    # Difference in year between start and end datetime of EIA data
-    no_years = int((end_dt - start_dt).total_seconds() / (365 * 24 * 3600))
-    
-    # Initialize list of max watthours
-    max_watthour_lst = []
-    
-    # Temp variable to set date boundaries
-    previous_year_dt = start_dt
+def get_max_megawatthour(df, energy_source):
+    ''' Return a DataFrame with the maximum megawatthours for each year '''
+
+    # Number of years for which we collect the data
+    no_years = int((last_hour_dt - first_hour_dt).total_seconds() / (365 * 24 * 3600))
+
+    # List of maximum values of MWh for each year of a specific energy source
+    max_megawatthour_lst = []
+
+    # Temporary variable to set boundaries of each year
+    current_year_dt = first_hour_dt
     for i in range(no_years):
-        next_year_dt = start_dt + dt.timedelta(years = i + 1)
+        next_year_dt = dt.datetime(first_hour_dt.year + i + 1, 1, 1)
+
+        # Get the maximum value
+        mask = (df['date'] >= current_year_dt) & (df['date'] < next_year_dt)
+        max_val = df[energy_source][mask].max()
         
-        mask = (df['date'] >= previous_year_dt) & (df['date'] < next_year_dt)
-        
-        max_watthour_lst.append(df[energy_source][mask].max())
-    
-    return max_watthour_lst
+        max_megawatthour_lst.append(max_val)  # Convert watthour to megawatthour
+
+    return max_megawatthour_lst
 
 def get_energy_df_from_api(
         first_hour_dt: dt.datetime,
@@ -70,7 +85,7 @@ def get_energy_df_from_api(
         api_energy_code: str,
         energy_source: str,
         password: str,
-        datetimes: List[dt.datetime]) -> pd.DataFrame:
+        datetimes: List[dt.datetime]) -> Tuple[pd.DataFrame, List]:
     '''
     This function fetches the energy data from the EIA API
 
@@ -144,7 +159,7 @@ def get_energy_df_from_api(
         current += length_query
         
     # Store max watthours
-    max_watthours = get_max_watthour(df, energy_source)
+    max_watthours_lst = get_max_megawatthour(df, energy_source)
     
     # Time the process
     delta_time = (dt.datetime.today() - start).total_seconds() / 60
@@ -152,64 +167,62 @@ def get_energy_df_from_api(
     # Update on downloaded dataset
     print(energy_source + f' -- finished download in {delta_time:.2f} minute(s)')
     
-    return df, max_watthours
+    return (df, max_watthours_lst)
 
 def clean_energy(master_df):
     """
     Cleans missing or invalid energy values in the dataset.
     Missing values are replaced with values from the same hour on the previous or next day (24-hour shift).
-    
+
     Parameters:
     master_df (pd.DataFrame): DataFrame containing energy data, including a 'date' column.
-    
+
     Returns:
     pd.DataFrame: Cleaned DataFrame with missing values filled.
     """
-    
+
     print("Cleaning Values\n")
-    
+
     # Iterate over each column, skipping 'date'
     for nrg in master_df.columns:
-        if nrg != 'date':  
-            filling = False  # Tracks whether we are in a filling sequence
-            
-            # Iterate over each row
-            for n in range(master_df.shape[0]):
-                value = master_df.at[n, nrg]
-                
-                # Check if the value is missing or not a valid number
-                if pd.isna(value) or not isinstance(value, (int, float, np.integer)):
-                    if not filling:
-                        print(f'Starting Fill at row {n}, column: {nrg}')
-                        filling = True
-                    
-                    # Ensure we don't go out of bounds
-                    if n < 24:
-                        if n + 24 < master_df.shape[0]:  # Check if forward fill is possible
-                            master_df.at[n, nrg] = master_df.at[n + 24, nrg]
-                        else:
-                            master_df.at[n, nrg] = np.nan  # Assign NaN if no valid fill
-                    else:
-                        master_df.at[n, nrg] = master_df.at[n - 24, nrg]
-                
+        if nrg == 'date':
+            continue
+        filling = False  # Tracks whether we are in a filling sequence
+
+        # Iterate over each row
+        for n in range(master_df.shape[0]):
+            value = master_df.at[n, nrg]
+
+            # Check if the value is missing or not a valid number
+            if pd.isna(value) or not isinstance(value, (int, float, np.integer)):
+                if not filling:
+                    print(f'Starting Fill at row {n}, column: {nrg}')
+                    filling = True
+
+                # Ensure we don't go out of bounds
+                if n < 24 and n + 24 < master_df.shape[0]:  # Check if forward fill is possible
+                    master_df.at[n, nrg] = master_df.at[n + 24, nrg]
+                elif n >= 24:
+                    master_df.at[n, nrg] = master_df.at[n - 24, nrg]
                 else:
-                    filling = False  # Reset filling flag when encountering a valid value
+                    master_df.at[n, nrg] = np.nan  # Assign NaN if no valid fill
+
+            else:
+                filling = False  # Reset filling flag when encountering a valid value
 
     return master_df
 
 
-def main(region_dict: dict[str]) -> None:
-    
-    # Start and end date and time of first and last entry
-    first_hour_dt = dt.datetime(2020, 1, 1) # by default set to 12AM (midnight)
-    last_hour_dt = dt.datetime(dt.date.today().year, 1, 1)
+def main(region_dict: dict[dict[list[str]]]) -> None:
     
     # Total number of entries = hours
     total_num_records = int((last_hour_dt - first_hour_dt).total_seconds() / 3600) # No. of records = total no. of hours
     
-    file_list = []
+    file_list_MWh = []
+    file_list_max_MWh = []
     os.chdir("./csv/Eia_Hourly")
-    master_df_folder_path = 'Latest/'
+    master_df_folder_path = 'Latest/MWh_values'
+    max_MWh_df_folder_path = 'Latest/max_MWh_values_yearly'
     
     # Fetch EIA password
     with open('../../../passwords/EIA.txt','r') as f:
@@ -221,17 +234,20 @@ def main(region_dict: dict[str]) -> None:
         sh.rmtree('Latest')
     
     # Make a new 'Latest' directory and if the parent directories are missing, create them as well
-    os.makedirs('Latest') 
+    os.makedirs(master_df_folder_path)
+    os.makedirs(max_MWh_df_folder_path)
     
     # Iterate over US States
     for region in region_dict.keys():
         
         # Initialize pandas.DataFrame with all the dates from first hour to last one
         master_df = init_master_df(first_hour_dt, total_num_records)
+        master_max_MWh_df = init_master_max_MWh(first_hour_dt, last_hour_dt)
         print(f'Starting region {region}\n')
         
         # File name of region-dependent master
         master_df_file = f"{region}_master.csv"
+        master_max_MWh_file = f"{region}_max_vals.csv"
         
         # Get the dictionary corresponding to the State
         energy_source_dictionary = region_dict[region]
@@ -246,7 +262,7 @@ def main(region_dict: dict[str]) -> None:
             if energy_source_dictionary[api_energy_code]['In_EIA']:
                 
                 # Get the megawatts produced hourly
-                energy_df, max_watthour = get_energy_df_from_api(
+                energy_df, max_MWh_df = get_energy_df_from_api(
                     first_hour_dt,
                     last_hour_dt,
                     total_num_records,
@@ -254,13 +270,14 @@ def main(region_dict: dict[str]) -> None:
                     api_energy_code,
                     energy_source,
                     password,
-                    master_df.date)
+                    master_df.date.to_list())
                 
                 # Merge master df with the data of the next energy source
                 if master_df.empty:
                     master_df = energy_df
                 else:
                     master_df = pd.concat([master_df, energy_df[energy_source]], axis = 1)
+                    master_max_MWh_df[energy_source] = max_MWh_df
             else:
                 print(region, energy_source, "-- zero filled")
                 zeros_df = pd.DataFrame(0, index=np.arange(total_num_records), columns=[energy_source])
@@ -277,151 +294,153 @@ def main(region_dict: dict[str]) -> None:
         master_df_norm = pd.DataFrame([])
         for col in master_df_clean.columns:
             if col != 'date':
-                max_val = master_df_clean[col].max()
+                max_val = master_df_clean[col].max() # type: ignore
                 
                 # If max_val is not null
                 if max_val:
                     master_df_norm[col] = master_df_clean[col] / max_val
         
         # Dump data to a CSV file
-        master_df_norm.to_csv(master_df_folder_path + master_df_file, index=False, sep=',')        
+        master_df_norm.to_csv(join(master_df_folder_path, master_df_file), index=False, sep=',')
+        master_max_MWh_df.to_csv(join(max_MWh_df_folder_path, master_max_MWh_file), index=False, sep=',')
     
-        file_list.append(master_df_folder_path + master_df_file)
+        file_list_MWh.append(join(master_df_folder_path, master_df_file))
+        file_list_max_MWh.append(join(max_MWh_df_folder_path, master_max_MWh_file))
     
 # call the main method on each region with their associated list of available energy
 region_dict = {
 
-    # 'CAL':{
-    #     'SUN':{'Title' :'Solar','In_EIA':True},
-    #     'NUC':{'Title' :'Nuclear','In_EIA':True},
-    #     'WND':{'Title' :'Wind','In_EIA':True},
-    #     'COL':{'Title' :'Coal','In_EIA':True},
-    #     'WAT':{'Title' :'Hydro','In_EIA':True},
-    #     'NG': {'Title' :'Gas','In_EIA':True},
-    #     'OTH':{'Title' :'Other','In_EIA':True},
-    #     'OIL':{'Title' :'Oil','In_EIA':True}
-    #     },  
+    'CAL':{
+        'SUN':{'Title' :'Solar','In_EIA':True},
+        'NUC':{'Title' :'Nuclear','In_EIA':True},
+        'WND':{'Title' :'Wind','In_EIA':True},
+        'COL':{'Title' :'Coal','In_EIA':True},
+        'WAT':{'Title' :'Hydro','In_EIA':True},
+        'NG': {'Title' :'Gas','In_EIA':True},
+        'OTH':{'Title' :'Other','In_EIA':True},
+        'OIL':{'Title' :'Oil','In_EIA':True}
+        },  
  
-    # 'CAR':{
-    #     'SUN':{'Title' :'Solar','In_EIA':True},
-    #     'NUC':{'Title' :'Nuclear','In_EIA':True},
-    #     'WND':{'Title' :'Wind','In_EIA':False},
-    #     'COL':{'Title' :'Coal','In_EIA':True},
-    #     'WAT':{'Title' :'Hydro','In_EIA':True},
-    #     'NG': {'Title' :'Gas','In_EIA':True},
-    #     'OTH':{'Title' :'Other','In_EIA':True},
-    #     'OIL':{'Title' :'Oil','In_EIA':True}
-    #     },
+    'CAR':{
+        'SUN':{'Title' :'Solar','In_EIA':True},
+        'NUC':{'Title' :'Nuclear','In_EIA':True},
+        'WND':{'Title' :'Wind','In_EIA':False},
+        'COL':{'Title' :'Coal','In_EIA':True},
+        'WAT':{'Title' :'Hydro','In_EIA':True},
+        'NG': {'Title' :'Gas','In_EIA':True},
+        'OTH':{'Title' :'Other','In_EIA':True},
+        'OIL':{'Title' :'Oil','In_EIA':True}
+        },
  
-    # 'CENT':{
-    #     'SUN':{'Title' :'Solar','In_EIA':True},
-    #     'NUC':{'Title' :'Nuclear','In_EIA':True},
-    #     'WND':{'Title' :'Wind','In_EIA':True},
-    #     'COL':{'Title' :'Coal','In_EIA':True},
-    #     'WAT':{'Title' :'Hydro','In_EIA':True},
-    #     'NG': {'Title' :'Gas','In_EIA':True},
-    #     'OTH':{'Title' :'Other','In_EIA':True},
-    #     'OIL':{'Title' :'Oil','In_EIA':True}
-    #     },
+    'CENT':{
+        'SUN':{'Title' :'Solar','In_EIA':True},
+        'NUC':{'Title' :'Nuclear','In_EIA':True},
+        'WND':{'Title' :'Wind','In_EIA':True},
+        'COL':{'Title' :'Coal','In_EIA':True},
+        'WAT':{'Title' :'Hydro','In_EIA':True},
+        'NG': {'Title' :'Gas','In_EIA':True},
+        'OTH':{'Title' :'Other','In_EIA':True},
+        'OIL':{'Title' :'Oil','In_EIA':True}
+        },
  
-    # 'FLA':{
-    #     'SUN':{'Title' :'Solar','In_EIA':True},
-    #     'NUC':{'Title' :'Nuclear','In_EIA':True},
-    #     'WND':{'Title' :'Wind','In_EIA':False},
-    #     'COL':{'Title' :'Coal','In_EIA':True},
-    #     'WAT':{'Title' :'Hydro','In_EIA':True},
-    #     'NG': {'Title' :'Gas','In_EIA':True},
-    #     'OTH':{'Title' :'Other','In_EIA':True},
-    #     'OIL':{'Title' :'Oil','In_EIA':True}
-    #     },
+    'FLA':{
+        'SUN':{'Title' :'Solar','In_EIA':True},
+        'NUC':{'Title' :'Nuclear','In_EIA':True},
+        'WND':{'Title' :'Wind','In_EIA':False},
+        'COL':{'Title' :'Coal','In_EIA':True},
+        'WAT':{'Title' :'Hydro','In_EIA':True},
+        'NG': {'Title' :'Gas','In_EIA':True},
+        'OTH':{'Title' :'Other','In_EIA':True},
+        'OIL':{'Title' :'Oil','In_EIA':True}
+        },
 
-    # 'MIDA':{
-    #     'SUN':{'Title' :'Solar','In_EIA':True},
-    #     'NUC':{'Title' :'Nuclear','In_EIA':True},
-    #     'WND':{'Title' :'Wind','In_EIA':True},
-    #     'COL':{'Title' :'Coal','In_EIA':True},
-    #     'WAT':{'Title' :'Hydro','In_EIA':True},
-    #     'NG': {'Title' :'Gas','In_EIA':True},
-    #     'OTH':{'Title' :'Other','In_EIA':True},
-    #     'OIL':{'Title' :'Oil','In_EIA':True}
-    #     },
+    'MIDA':{
+        'SUN':{'Title' :'Solar','In_EIA':True},
+        'NUC':{'Title' :'Nuclear','In_EIA':True},
+        'WND':{'Title' :'Wind','In_EIA':True},
+        'COL':{'Title' :'Coal','In_EIA':True},
+        'WAT':{'Title' :'Hydro','In_EIA':True},
+        'NG': {'Title' :'Gas','In_EIA':True},
+        'OTH':{'Title' :'Other','In_EIA':True},
+        'OIL':{'Title' :'Oil','In_EIA':True}
+        },
 
-    # 'MIDW':{
-    #     'SUN':{'Title' :'Solar','In_EIA':True},
-    #     'NUC':{'Title' :'Nuclear','In_EIA':True},
-    #     'WND':{'Title' :'Wind','In_EIA':True},
-    #     'COL':{'Title' :'Coal','In_EIA':True},
-    #     'WAT':{'Title' :'Hydro','In_EIA':True},
-    #     'NG': {'Title' :'Gas','In_EIA':True},
-    #     'OTH':{'Title' :'Other','In_EIA':True},
-    #     'OIL':{'Title' :'Oil','In_EIA':False}
-    #     },
+    'MIDW':{
+        'SUN':{'Title' :'Solar','In_EIA':True},
+        'NUC':{'Title' :'Nuclear','In_EIA':True},
+        'WND':{'Title' :'Wind','In_EIA':True},
+        'COL':{'Title' :'Coal','In_EIA':True},
+        'WAT':{'Title' :'Hydro','In_EIA':True},
+        'NG': {'Title' :'Gas','In_EIA':True},
+        'OTH':{'Title' :'Other','In_EIA':True},
+        'OIL':{'Title' :'Oil','In_EIA':False}
+        },
     
-    # 'NE':{
-    #     'SUN':{'Title' :'Solar','In_EIA':True},
-    #     'NUC':{'Title' :'Nuclear','In_EIA':True},
-    #     'WND':{'Title' :'Wind','In_EIA':True},
-    #     'COL':{'Title' :'Coal','In_EIA':True},
-    #     'WAT':{'Title' :'Hydro','In_EIA':True},
-    #     'NG': {'Title' :'Gas','In_EIA':True},
-    #     'OTH':{'Title' :'Other','In_EIA':True},
-    #     'OIL':{'Title' :'Oil','In_EIA':True}
-    #     },
+    'NE':{
+        'SUN':{'Title' :'Solar','In_EIA':True},
+        'NUC':{'Title' :'Nuclear','In_EIA':True},
+        'WND':{'Title' :'Wind','In_EIA':True},
+        'COL':{'Title' :'Coal','In_EIA':True},
+        'WAT':{'Title' :'Hydro','In_EIA':True},
+        'NG': {'Title' :'Gas','In_EIA':True},
+        'OTH':{'Title' :'Other','In_EIA':True},
+        'OIL':{'Title' :'Oil','In_EIA':True}
+        },
     
-    # 'NW':{
-    #     'SUN':{'Title' :'Solar','In_EIA':True},
-    #     'NUC':{'Title' :'Nuclear','In_EIA':True},
-    #     'WND':{'Title' :'Wind','In_EIA':True},
-    #     'COL':{'Title' :'Coal','In_EIA':True},
-    #     'WAT':{'Title' :'Hydro','In_EIA':True},
-    #     'NG': {'Title' :'Gas','In_EIA':True},
-    #     'OTH':{'Title' :'Other','In_EIA':True},
-    #     'OIL':{'Title' :'Oil','In_EIA':True}
-    #     },
+    'NW':{
+        'SUN':{'Title' :'Solar','In_EIA':True},
+        'NUC':{'Title' :'Nuclear','In_EIA':True},
+        'WND':{'Title' :'Wind','In_EIA':True},
+        'COL':{'Title' :'Coal','In_EIA':True},
+        'WAT':{'Title' :'Hydro','In_EIA':True},
+        'NG': {'Title' :'Gas','In_EIA':True},
+        'OTH':{'Title' :'Other','In_EIA':True},
+        'OIL':{'Title' :'Oil','In_EIA':True}
+        },
     
-    # 'NY':{
-    #     'SUN':{'Title' :'Solar','In_EIA':True},
-    #     'NUC':{'Title' :'Nuclear','In_EIA':True},
-    #     'WND':{'Title' :'Wind','In_EIA':True},
-    #     'COL':{'Title' :'Coal','In_EIA':True},
-    #     'WAT':{'Title' :'Hydro','In_EIA':True},
-    #     'NG': {'Title' :'Gas','In_EIA':True},
-    #     'OTH':{'Title' :'Other','In_EIA':True},
-    #     'OIL':{'Title' :'Oil','In_EIA':True}
-    #     },
+    'NY':{
+        'SUN':{'Title' :'Solar','In_EIA':True},
+        'NUC':{'Title' :'Nuclear','In_EIA':True},
+        'WND':{'Title' :'Wind','In_EIA':True},
+        'COL':{'Title' :'Coal','In_EIA':True},
+        'WAT':{'Title' :'Hydro','In_EIA':True},
+        'NG': {'Title' :'Gas','In_EIA':True},
+        'OTH':{'Title' :'Other','In_EIA':True},
+        'OIL':{'Title' :'Oil','In_EIA':True}
+        },
     
-    # 'SE':{
-    #     'SUN':{'Title' :'Solar','In_EIA':True},
-    #     'NUC':{'Title' :'Nuclear','In_EIA':True},
-    #     'WND':{'Title' :'Wind','In_EIA':True},
-    #     'COL':{'Title' :'Coal','In_EIA':True},
-    #     'WAT':{'Title' :'Hydro','In_EIA':True},
-    #     'NG': {'Title' :'Gas','In_EIA':True},
-    #     'OTH':{'Title' :'Other','In_EIA':True},
-    #     'OIL':{'Title' :'Oil','In_EIA':True}
-    #     },
+    'SE':{
+        'SUN':{'Title' :'Solar','In_EIA':True},
+        'NUC':{'Title' :'Nuclear','In_EIA':True},
+        'WND':{'Title' :'Wind','In_EIA':True},
+        'COL':{'Title' :'Coal','In_EIA':True},
+        'WAT':{'Title' :'Hydro','In_EIA':True},
+        'NG': {'Title' :'Gas','In_EIA':True},
+        'OTH':{'Title' :'Other','In_EIA':True},
+        'OIL':{'Title' :'Oil','In_EIA':True}
+        },
     
-    # 'SW':{
-    #     'SUN':{'Title' :'Solar','In_EIA':True},
-    #     'NUC':{'Title' :'Nuclear','In_EIA':True},
-    #     'WND':{'Title' :'Wind','In_EIA':True},
-    #     'COL':{'Title' :'Coal','In_EIA':True},
-    #     'WAT':{'Title' :'Hydro','In_EIA':True},
-    #     'NG': {'Title' :'Gas','In_EIA':True},
-    #     'OTH':{'Title' :'Other','In_EIA':True},
-    #     'OIL':{'Title' :'Oil','In_EIA':True}
-    #     },
+    'SW':{
+        'SUN':{'Title' :'Solar','In_EIA':True},
+        'NUC':{'Title' :'Nuclear','In_EIA':True},
+        'WND':{'Title' :'Wind','In_EIA':True},
+        'COL':{'Title' :'Coal','In_EIA':True},
+        'WAT':{'Title' :'Hydro','In_EIA':True},
+        'NG': {'Title' :'Gas','In_EIA':True},
+        'OTH':{'Title' :'Other','In_EIA':True},
+        'OIL':{'Title' :'Oil','In_EIA':True}
+        },
     
-    # 'TEN':{
-    #     'SUN':{'Title' :'Solar','In_EIA':True},
-    #     'NUC':{'Title' :'Nuclear','In_EIA':True},
-    #     'WND':{'Title' :'Wind','In_EIA':True},
-    #     'COL':{'Title' :'Coal','In_EIA':True},
-    #     'WAT':{'Title' :'Hydro','In_EIA':True},
-    #     'NG': {'Title' :'Gas','In_EIA':True},
-    #     'OTH':{'Title' :'Other','In_EIA':True},
-    #     'OIL':{'Title' :'Oil','In_EIA':True}
-    #     },
+    'TEN':{
+        'SUN':{'Title' :'Solar','In_EIA':True},
+        'NUC':{'Title' :'Nuclear','In_EIA':True},
+        'WND':{'Title' :'Wind','In_EIA':True},
+        'COL':{'Title' :'Coal','In_EIA':True},
+        'WAT':{'Title' :'Hydro','In_EIA':True},
+        'NG': {'Title' :'Gas','In_EIA':True},
+        'OTH':{'Title' :'Other','In_EIA':True},
+        'OIL':{'Title' :'Oil','In_EIA':True}
+        },
     
     'TEX':{
         'SUN':{'Title' :'Solar','In_EIA':True},

@@ -8,7 +8,8 @@ Python/Mailbox/Outbox/*
 !Python/Mailbox/Outbox/Holdme
 Library/Debug*
 Share/Share.zip
-csv/Eia_Hourly/Latest/*.csv
+csv/Eia_Hourly/Latest/max_MWh_values_yearly/*.csv
+csv/Eia_Hourly/Latest/MWh_values/*.csv
 .vscode/
 
 #excel temp files
