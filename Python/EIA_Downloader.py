@@ -17,7 +17,8 @@ length_query = 5000
 
 # Start and end date and time of first and last entry
 first_hour_dt = dt.datetime(2020, 1, 1) # by default set to 12AM (midnight)
-last_hour_dt = dt.datetime(dt.date.today().year, 1, 1)
+# last_hour_dt = dt.datetime(dt.date.today().year, 1, 1)
+last_hour_dt = dt.datetime(2022, 1, 1)
 
 def init_master_df(first_hour_dt, total_num_records):
     ''' Initialize the master dataframe with all the datetimes '''
@@ -35,6 +36,25 @@ def init_master_max_MWh(first_hour_dt, last_hour_dt):
             'years': [int(first_hour_dt.year) + i for i in range(no_years)]
         }
     )
+
+def normalize_per_year(
+    df: pd.DataFrame,
+    year: int,
+    energy_source: str,
+    max_val: int) -> pd.DataFrame:
+    ''' Normalize the MWh data for each year to the maximum value (not inplace)'''
+    
+    # Type casting
+    df[energy_source].astype('float64')
+    
+    # Define year boundaries
+    lower_bound = dt.datetime(year, 1, 1)
+    upper_bound = dt.datetime(year + 1, 1, 1)
+    
+    mask = (df['date'] >= lower_bound) & (df['date'] < upper_bound)
+    df[energy_source][mask] = df[energy_source][mask] / max_val
+    
+    return df
     
 def URL_constructor(
         password: str,
@@ -213,7 +233,7 @@ def clean_energy(master_df):
     return master_df
 
 
-def main(region_dict: dict[dict[list[str]]]) -> None:
+def main(region_dict: dict[str, dict[str, list[str]]]) -> None:
     
     # Total number of entries = hours
     total_num_records = int((last_hour_dt - first_hour_dt).total_seconds() / 3600) # No. of records = total no. of hours
@@ -225,20 +245,12 @@ def main(region_dict: dict[dict[list[str]]]) -> None:
     max_MWh_df_folder_path = 'Latest/max_MWh_values_yearly'
     
     # Fetch EIA password
-    with open('../../../passwords/EIA.txt','r') as f:
-        password = f.read()
+    password = _get_eia_password('../../../passwords/EIA.txt')
     
-    # Check if Latest exists in cwd
-    if os.path.exists('Latest'):
-        # If it exists, delete all files and subdirectories in it
-        sh.rmtree('Latest')
-    
-    # Make a new 'Latest' directory and if the parent directories are missing, create them as well
-    os.makedirs(master_df_folder_path)
-    os.makedirs(max_MWh_df_folder_path)
+    _reset_latest_folders(master_df_folder_path, max_MWh_df_folder_path)
     
     # Iterate over US States
-    for region in region_dict.keys():
+    for region in region_dict:
         
         # Initialize pandas.DataFrame with all the dates from first hour to last one
         master_df = init_master_df(first_hour_dt, total_num_records)
@@ -275,6 +287,7 @@ def main(region_dict: dict[dict[list[str]]]) -> None:
                 # Merge master df with the data of the next energy source
                 if master_df.empty:
                     master_df = energy_df
+                    master_max_MWh_df[energy_source] = np.zeros(master_max_MWh_df.shape[0])
                 else:
                     master_df = pd.concat([master_df, energy_df[energy_source]], axis = 1)
                     master_max_MWh_df[energy_source] = max_MWh_df
@@ -283,23 +296,16 @@ def main(region_dict: dict[dict[list[str]]]) -> None:
                 zeros_df = pd.DataFrame(0, index=np.arange(total_num_records), columns=[energy_source])
                 master_df = pd.concat([master_df, zeros_df], axis = 1)
         
-        # Format casting from ISO 8601 to 'YYMMDDTHH'
-        master_df['date'] = pd.to_datetime(master_df['date'], format="ISO8601")
-        master_df['date'] = master_df['date'].dt.strftime("%Y%m%dT%H")
-        
         # Clean up the DataFrame in case of missing data
         master_df_clean = clean_energy(master_df)
         
         # Normalize master df
-        master_df_norm = pd.DataFrame([])
-        for col in master_df_clean.columns:
-            if col != 'date':
-                max_val = master_df_clean[col].max() # type: ignore
-                
-                # If max_val is not null
-                if max_val:
-                    master_df_norm[col] = master_df_clean[col] / max_val
+        master_df_norm = _normalize_master_df_yearly(master_df_clean, master_max_MWh_df)
         
+        # Format casting from datetime ISO 8601 to 'YYMMDDTHH'        
+        master_df_norm['date'] = pd.to_datetime(master_df_norm['date'], format="ISO8601")
+        master_df_norm['date'] = master_df_norm['date'].dt.strftime("%Y%m%dT%H")
+
         # Dump data to a CSV file
         master_df_norm.to_csv(join(master_df_folder_path, master_df_file), index=False, sep=',')
         master_max_MWh_df.to_csv(join(max_MWh_df_folder_path, master_max_MWh_file), index=False, sep=',')
@@ -307,6 +313,25 @@ def main(region_dict: dict[dict[list[str]]]) -> None:
         file_list_MWh.append(join(master_df_folder_path, master_df_file))
         file_list_max_MWh.append(join(max_MWh_df_folder_path, master_max_MWh_file))
     
+def _get_eia_password(password_path: str) -> str:
+    with open(password_path, 'r') as f:
+        return f.read()
+
+def _reset_latest_folders(master_df_folder_path: str, max_MWh_df_folder_path: str) -> None:
+    if os.path.exists('Latest'):
+        sh.rmtree('Latest')
+    os.makedirs(master_df_folder_path)
+    os.makedirs(max_MWh_df_folder_path)
+    
+def _normalize_master_df_yearly(master_df_clean: pd.DataFrame, master_max_MWh_df: pd.DataFrame) -> pd.DataFrame:
+    master_df_norm = master_df_clean.copy()
+    for enrgy_src in master_df_clean.columns:
+        if enrgy_src != 'date':
+            for year, max_val in zip(master_max_MWh_df['years'], master_max_MWh_df[enrgy_src]):
+                if max_val:
+                    master_df_norm = normalize_per_year(master_df_norm, year, enrgy_src, max_val)
+    return master_df_norm
+
 # call the main method on each region with their associated list of available energy
 region_dict = {
 
