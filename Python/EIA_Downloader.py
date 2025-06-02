@@ -7,6 +7,7 @@ import datetime as dt
 import shutil as sh
 from os.path import join
 from typing import List, Tuple
+import stat
 
 # Global read-only constants
 dirname, filename = os.path.split(os.path.abspath(__file__))
@@ -45,15 +46,14 @@ def normalize_per_year(
     ''' Normalize the MWh data for each year to the maximum value (not inplace)'''
     
     # Type casting
-    df[energy_source].astype('float64')
+    df[energy_source] = df[energy_source].astype('float64')
     
     # Define year boundaries
     lower_bound = dt.datetime(year, 1, 1)
     upper_bound = dt.datetime(year + 1, 1, 1)
     
     mask = (df['date'] >= lower_bound) & (df['date'] < upper_bound)
-    df[energy_source][mask] = df[energy_source][mask] / max_val
-    
+    df.loc[mask,energy_source] = df.loc[mask, energy_source] / max_val
     return df
     
 def URL_constructor(
@@ -295,6 +295,8 @@ def main(region_dict: dict[str, dict[str, list[str]]]) -> None:
                 print(region, energy_source, "-- zero filled")
                 zeros_df = pd.DataFrame(0, index=np.arange(total_num_records), columns=[energy_source])
                 master_df = pd.concat([master_df, zeros_df], axis = 1)
+                master_max_MWh_df[energy_source] = np.zeros(master_max_MWh_df.shape[0]) 
+
         
         # Clean up the DataFrame in case of missing data
         master_df_clean = clean_energy(master_df)
@@ -317,9 +319,16 @@ def _get_eia_password(password_path: str) -> str:
     with open(password_path, 'r') as f:
         return f.read()
 
+def force_remove_readonly(func, path, excinfo):
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except Exception as e:
+        print(f"Error deleting {path}: {e}")
+
 def _reset_latest_folders(master_df_folder_path: str, max_MWh_df_folder_path: str) -> None:
     if os.path.exists('Latest'):
-        sh.rmtree('Latest')
+        sh.rmtree('Latest', onerror=force_remove_readonly)
     os.makedirs(master_df_folder_path)
     os.makedirs(max_MWh_df_folder_path)
     
