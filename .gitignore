@@ -8,7 +8,14 @@ Python/Mailbox/Outbox/*
 !Python/Mailbox/Outbox/Holdme
 Library/Debug*
 Share/Share.zip
-csv/Eia_Hourly/Latest/*.csv
+csv/Eia_Hourly/**
+!csv/Eia_Hourly/Latest/
+!csv/Eia_Hourly/Latest/**
+# Do not ignore the Latest directory
+#!csv/Eia_Hourly/Latest/
+
+# Do not ignore everything under Latest, including subdirs and files
+#!csv/Eia_Hourly/Latest/**
 .vscode/
 
 #excel temp files

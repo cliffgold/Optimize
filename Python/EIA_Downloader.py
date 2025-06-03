@@ -18,8 +18,8 @@ length_query = 5000
 
 # Start and end date and time of first and last entry
 first_hour_dt = dt.datetime(2020, 1, 1) # by default set to 12AM (midnight)
-# last_hour_dt = dt.datetime(dt.date.today().year, 1, 1)
-last_hour_dt = dt.datetime(2022, 1, 1)
+last_hour_dt = dt.datetime(dt.date.today().year, 1, 1)
+# SHORTIE last_hour_dt = dt.datetime(2022, 1, 1)
 
 def init_master_df(first_hour_dt, total_num_records):
     ''' Initialize the master dataframe with all the datetimes '''
