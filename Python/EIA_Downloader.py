@@ -241,7 +241,7 @@ def main(region_dict: dict[str, dict[str, list[str]]]) -> None:
     file_list_MWh = []
     file_list_max_MWh = []
     os.chdir("./csv/Eia_Hourly")
-    master_df_folder_path = 'Latest/MWh_values'
+    master_df_folder_path = 'Latest/Hourly_Capacity_values'
     max_MWh_df_folder_path = 'Latest/max_MWh_values_yearly'
     
     # Fetch EIA password
