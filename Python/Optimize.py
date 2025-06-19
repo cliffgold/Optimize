@@ -5,7 +5,6 @@ from scipy.optimize import minimize, Bounds
 from math import log10, floor
 import os 
 import time
-import ctypes
 import warnings
 import multiprocessing as mp
 import traceback
@@ -82,9 +81,6 @@ if(debug_one_case or debug_step_minimizer or debug_final_run):
 
 #******************** End of Globals ***************
 #
-def round_significant(x,sig):
-    x = round(x, -int(floor(log10(abs(x))))+sig-1)
-    return x
 
 # Save debug matrix
 def save_matrix(file_name, matrix):
@@ -129,25 +125,45 @@ def get_all_regions():
                               deletechars=delete_chars)  
     return regions_temp['Abbr']
     
-#Get hourly data
+#There are three sets of EIA data for each region:
+#   1. hourly_cap_pct_nrgs: Hourly capacity percentages used historicly for each nrg.  
+#       These percentages do not change for each year run.
+#   2. MW_nrgs: Maximum MW for each nrg.  
+#       This starts at the maximum MWh for the historical data.
+#       Then, it is adjusted each year as plants are retired, and new plants are built
+#   3. hourly_MWh_demand: Total MWh required for each hour.
+#       This starts with the historical data, and is adjusted based on the demand tweak
+#   Note that nrg sources "Hydro", "Oil" and "Other" are not used in the optimization.
+#      They are assumed to grow with demand.
+#   Also note that gas and battery are figured as fill-in at the end of each test run.
 def get_eia_data(region):
     eia_filename = f'{region}_master.csv'
-    csv_path = f'./csv/Eia_Hourly/Latest/{eia_filename}'
-
-    eia_csv = pd.read_csv(csv_path,
+    csv_path = f'./csv/Eia_Hourly/Latest/Hourly_Capacity_values/{eia_filename}'
+    eia_cap_csv = pd.read_csv(csv_path,
                          header=0, 
                          skiprows=0)
-    hourly_nrgs       = pd.DataFrame(0,index=eia_csv.index, columns=nrgs)
+    
+    csv_path = f'./csv/Eia_Hourly/Latest/Max_MWh_values_yearly/{eia_filename}'  
+    eia_max_csv = pd.read_csv(csv_path,
+                         header=0, 
+                         skiprows=0)
+     
+    # Set up the hourly capacity percentages and max MW for each nrg
+    # Also total demand for each hour
+    hourly_cap_pct_nrgs = pd.DataFrame(0,index=eia_cap_csv.index, columns=nrgs, dtype=float)
+    MW_nrgs             = pd.Series(0, index=nrgs, dtype=float)
+    hourly_target_MWh   = pd.Series(0, index=eia_cap_csv.index, dtype=float)
     for nrg in nrgs:
         if nrg == 'Battery':
-            hourly_nrgs['Battery'] = pd.Series(0, index=eia_csv.index)
+            hourly_cap_pct_nrgs['Battery'] = pd.Series(0, index=eia_cap_csv.index)
+            MW_nrgs['Battery']             = 0
         else:
-            hourly_nrgs[nrg] = eia_csv[nrg]
-            
-    hourly_nrgs       = df_int_to_float(hourly_nrgs)    
-    hourly_others     = pd.Series(0,index=hourly_nrgs.index)
-    hourly_others     = eia_csv['Hydro'] + eia_csv['Oil'] + eia_csv['Other']
-    return hourly_nrgs, hourly_others
+            hourly_cap_pct_nrgs[nrg] = eia_cap_csv[nrg]
+            # This .max() is to pick the maximum value for all years
+            # Usually, this is the last year
+            MW_nrgs[nrg]             = eia_max_csv[nrg].max()
+            hourly_target_MWh       += eia_max_csv[nrg] * hourly_cap_pct_nrgs[nrg]
+    return hourly_cap_pct_nrgs, MW_nrgs, hourly_target_MWh
 
 def init_output_matrix():
     output_header_loc = output_header    
@@ -211,12 +227,11 @@ def fig_tweaks(
     return tweaked_globals, tweaked_nrgs
 
 # Figure loss due to lifetime of plant
-def fig_decadence(hourly_nrgs, supply_MWh_nrgs, MW_nrgs, tweaked_nrgs):
+def fig_decadence(supply_MWh_nrgs, MW_nrgs, tweaked_nrgs):
     for nrg in nrgs:
-        hourly_nrgs[nrg]     *= 1 - (1/tweaked_nrgs.at['Lifetime', nrg])
         MW_nrgs[nrg]         *= 1 - (1/tweaked_nrgs.at['Lifetime', nrg])
         supply_MWh_nrgs[nrg] *= 1 - (1/tweaked_nrgs.at['Lifetime', nrg])
-    return hourly_nrgs, supply_MWh_nrgs, MW_nrgs
+    return supply_MWh_nrgs, MW_nrgs
     
 # Gas fills any leftover need.  If not enough, storage.  If not enough, outage (VERY expensive)
 def fig_gas_and_storage(needed_hourly,   
@@ -596,11 +611,16 @@ def cost_function(
 # This updates the data based on knob settings.
 #   Solar, Wind, Nuclear and Coal have nrg total multiplied by knob
 #   Gas and (if necessary) storage is used to fill up to target value
-#   Any excess is used to recharge storage
+#   Any excess is used to recharge storage. 
+
+# If Supercharge is set, any available gas is used for storage 
+
+# Note that all values must be passed as copies, so that
+#   next run of optimize starts from the beginning
 
 def update_data(
                knobs_nrgs,       
-               hourly_nrgs,   
+               hourly_cap_pct_nrgs,   
                supply_MWh_nrgs,      
                MW_nrgs,
                tweaked_globals,
@@ -625,7 +645,7 @@ def update_data(
     for nrg in ['Solar','Wind','Nuclear','Coal']:
         if (zero_nrgs[nrg] == 0):
             # High Compute Time
-            hourly_nrgs[nrg]     *= knobs_nrgs[nrg]
+            new_hourly_cap_pct_nrgs[nrg] = knobs_nrgs[nrg] * hourly_cap_pct_nrgs[nrg]  
             supply_MWh_nrgs[nrg] *= knobs_nrgs[nrg]
             if (knobs_nrgs[nrg] > 1):
                 MW_nrgs[nrg] *= knobs_nrgs[nrg]
@@ -634,7 +654,7 @@ def update_data(
                         MW_nrgs['Nuclear'] * (knobs_nrgs['Nuclear'] - 1) * tweaked_globals.at['Molten_Rate']
                 
             # High Compute Time
-            needed_hourly    -= hourly_nrgs[nrg]
+            needed_hourly    -= hourly_cap_pct_nrgs[nrg]
         else:
             adj_zeros += knobs_nrgs[nrg]
 
@@ -654,7 +674,7 @@ def update_data(
         =                \
         fig_gas_and_storage(
                 needed_hourly   = needed_hourly,                   
-                nuclear_hourly  = hourly_nrgs['Nuclear'],
+                nuclear_hourly  = hourly_cap_pct_nrgs['Nuclear'],
                 gas_max         = MW_nrgs['Gas'],
                 battery_max     = MW_nrgs['Battery'],
                 molten_max      = molten_max,
@@ -667,7 +687,7 @@ def update_data(
                 year            = year)  
           
     demand_MWh_nrgs = fig_excess(supply_MWh_nrgs, excess_MWh, after_optimize)
-    return hourly_nrgs,    \
+    return hourly_cap_pct_nrgs,    \
            demand_MWh_nrgs,\
            MW_nrgs,        \
            battery_stored, \
@@ -682,7 +702,7 @@ def update_data(
 # Main function used by minimizer              
 def solve_this(
                knobs,                   
-               hourly_nrgs,           
+               hourly_cap_pct_nrgs,           
                MW_nrgs,
                supply_MWh_nrgs,
                battery_stored,       
@@ -703,22 +723,22 @@ def solve_this(
 # We need it to stay the same for the next minimize run           
     new_MW_nrgs         = MW_nrgs.copy() 
     new_supply_MWh_nrgs = supply_MWh_nrgs.copy()
-    new_hourly_nrgs     = hourly_nrgs.copy()
+    new_hourly_cap_pct_nrgs     = hourly_cap_pct_nrgs.copy()
     new_battery_stored  = battery_stored
     new_molten_stored   = molten_stored
     new_molten_max      = molten_max
     
     ####if (debug_unexpected_change):
         # These should start the same for all calls to solve_this in one year
-        #####double_print(new_hourly_nrgs.at[1234,'Solar'] + '\n' + 
+        #####double_print(new_hourly_cap_pct_nrgs.at[1234,'Solar'] + '\n' + 
         #####      new_supply_MWh_nrgs['Wind'] + '\n' +      
         #####      new_MW_nrgs['Nuclear'] + '\n' +           
-        #####      new_hourly_nrgs.sum() + '\n' +            
+        #####      new_hourly_cap_pct_nrgs.sum() + '\n' +            
         #####      new_battery_stored + '\n' +
         #####      new_molten_stored + '\n' +
         #####      new_molten_max)
     
-    new_hourly_nrgs,     \
+    new_hourly_cap_pct_nrgs,     \
     new_demand_MWh_nrgs, \
     new_MW_nrgs,         \
     new_battery_stored,  \
@@ -730,7 +750,7 @@ def solve_this(
     new_supply_MWh_nrgs  \
         = update_data(
                       knobs_nrgs      = knobs_nrgs,           
-                      hourly_nrgs     = new_hourly_nrgs,
+                      hourly_cap_pct_nrgs     = new_hourly_cap_pct_nrgs,
                       supply_MWh_nrgs = new_supply_MWh_nrgs,    
                       MW_nrgs         = new_MW_nrgs,
                       tweaked_globals = tweaked_globals,
@@ -772,7 +792,7 @@ def init_knobs(tweaked_globals, tweaked_nrgs):
     return knobs_nrgs
 
 def run_minimizer(    
-                  hourly_nrgs,                 
+                  hourly_cap_pct_nrgs,                 
                   MW_nrgs,
                   supply_MWh_nrgs,
                   battery_stored,
@@ -810,8 +830,8 @@ def run_minimizer(
         start_knobs[nrg] = knobs_nrgs[nrg].copy()
         
     # and retire some old plants
-    hourly_nrgs, supply_MWh_nrgs, MW_nrgs = \
-                fig_decadence(hourly_nrgs, supply_MWh_nrgs, MW_nrgs, tweaked_nrgs)
+    supply_MWh_nrgs, MW_nrgs = \
+                fig_decadence(supply_MWh_nrgs, MW_nrgs, tweaked_nrgs)
     if (debug_one_case):
         knobs_nrgs   = one_case(year)
         max_add_nrgs = pd.Series(999.,index=nrgs, dtype=float)
@@ -854,7 +874,7 @@ def run_minimizer(
                         solve_this, 
                         knobs, 
                         args=(                 
-                            hourly_nrgs,         
+                            hourly_cap_pct_nrgs,         
                             MW_nrgs,            
                             supply_MWh_nrgs,
                             battery_stored,
@@ -930,21 +950,16 @@ def do_region(region):
     years         = inbox.at['Years', 'Initial']
     specs_nrgs    = get_specs_nrgs()
  
-    hourly_nrgs, hourly_others = get_eia_data(region) 
-    # If there is old data there, remove it
-    outbox_path = './Python/Mailbox/Outbox'    
-    file_path = f'{outbox_path}/{inbox.at["SubDir", "Text"]}-{region}.csv'
-    
-    MW_nrgs         = pd.Series(0,index=nrgs, dtype=float)
+    hourly_cap_pct_nrgs, MW_nrgs, demand_MWh_nrgs = get_eia_data(region) 
+
     supply_MWh_nrgs = pd.Series(0,index=nrgs, dtype=float)
     total_hourly    = pd.Series(np.zeros(sample_hours, dtype=float))
     zero_nrgs       = pd.Series(0,index=nrgs, dtype=float)
     molten_max      = 0.
     
     for nrg in nrgs:
-        MW_nrgs[nrg]         = hourly_nrgs[nrg].max()
-        supply_MWh_nrgs[nrg] = hourly_nrgs[nrg].sum() / sample_years
-        total_hourly        += hourly_nrgs[nrg]   
+        supply_MWh_nrgs[nrg] = hourly_cap_pct_nrgs[nrg].sum() / sample_years
+        total_hourly        += hourly_cap_pct_nrgs[nrg]   
         if (supply_MWh_nrgs[nrg] == 0) & (nrg != 'Battery'):
             zero_nrgs[nrg] = 1
             
@@ -998,13 +1013,13 @@ def do_region(region):
                     inbox           = inbox,
                     year            = year)
         
-        target_hourly = (target_hourly * tweaked_globals['Demand']) + (hourly_others * (tweaked_globals['Demand']-1))
+        target_hourly = (target_hourly * tweaked_globals['Demand'])
     
 # Now optimize this year 
         after_optimize = False           
         knobs_nrgs, max_add_nrgs, start_knobs = \
             run_minimizer( \
-                            hourly_nrgs     = hourly_nrgs,                  
+                            hourly_cap_pct_nrgs     = hourly_cap_pct_nrgs,                  
                             MW_nrgs         = MW_nrgs, 
                             supply_MWh_nrgs = supply_MWh_nrgs,
                             battery_stored  = battery_stored, 
@@ -1024,7 +1039,7 @@ def do_region(region):
         after_optimize = True
 # Update data based on optimized knobs 
             
-        hourly_nrgs,    \
+        hourly_cap_pct_nrgs,    \
         demand_MWh_nrgs,\
         MW_nrgs,        \
         battery_stored, \
@@ -1036,7 +1051,7 @@ def do_region(region):
         supply_MWh_nrgs \
             = update_data( 
                     knobs_nrgs      = knobs_nrgs,       
-                    hourly_nrgs     = hourly_nrgs,
+                    hourly_cap_pct_nrgs = hourly_cap_pct_nrgs,
                     supply_MWh_nrgs = supply_MWh_nrgs,    
                     MW_nrgs         = MW_nrgs,
                     tweaked_globals = tweaked_globals,
