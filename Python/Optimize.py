@@ -38,10 +38,7 @@ param_order   = pd.Series(['MW','Demand_MWh', 'Supply_MWh', 'Cost', 'CO2_Cost', 
 tweaked_globals_order = pd.Series(['CO2_Price', 'Demand', 'Interest', 'Molten_Rate'])
 tweaked_nrgs_order    = pd.Series(['Capital','Fixed', 'perMW', 'perMWh', 'Max_PCT', 'Lifetime', 'CO2_gen'])
 
-# Sample years in the EIA data.  Will be set in get_eia_data().
-sample_years = 0
-sample_hours = 0
-# used by debug, and other places 
+# used by debug, and other places. *.csv converts 1.0 to 1, so we need to convert it back. 
 def df_int_to_float(df):
 # Identify integer columns and convert them to float
     int_cols = df.select_dtypes(include=['int']).columns
@@ -53,17 +50,18 @@ def df_int_to_float(df):
 kill_parallel = False
 
 # run one set of knobs/Year - no minimize()
-debug_one_case = True
+debug_one_case =  False
 if debug_one_case:
     one_case_nrgs = pd.read_csv('Analysis/debug_knobs.csv')
     one_case_nrgs = df_int_to_float(one_case_nrgs)
-    debug_matrix_columns = pd.Series(['Count', 'Hour of Need', 'Gas_MWh', 'Battery_MWh', 'Molten_MWh', 'Outage_MWh'])
-    print(one_case_nrgs['Solar'])
+    debug_matrix_columns = pd.Series \
+        (['Year', 'Supply_var', 'Supply_matrix', 'Demand_var', 'Demand_matrix'])
+    debug_filename       = 'Debug_One_Case'
 # True = print minimize results
 debug_minimizer = False
 
 # Print out on each step of the minimizer
-debug_step_minimizer = True
+debug_step_minimizer = False
 if debug_step_minimizer:
     debug_matrix_columns = pd.Series(['Year'])
     for nrg in nrgs:
@@ -90,12 +88,12 @@ if(debug_one_case or debug_step_minimizer or debug_final_run):
 #
 
 # Save debug matrix
-def save_matrix(file_name, matrix):
+def save_matrix(file_name, matrix, file_path='./Python/Mailbox/Outbox/'):
     if (matrix.size > 1):
-        file_path = './Python/Mailbox/Outbox/' + file_name + '.csv'
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        matrix.to_csv(file_path)
+        full_path = file_path  + file_name + '.csv'
+        if os.path.exists(full_path):
+            os.remove(full_path)
+        matrix.to_csv(full_path)
       
 
 # Get price, CO2 generated, etc for each nrg
@@ -138,8 +136,6 @@ def get_all_regions():
 #      They are assumed to grow with demand.
 #   Also note that gas and battery are figured as fill-in at the end of each test run.
 def get_eia_data(region):
-    global sample_years, sample_hours
-
     eia_filename = f'{region}_master.csv'
     csv_path = f'./csv/Eia_Hourly/Latest/Hourly_Capacity_values/{eia_filename}'
     eia_cap_csv = pd.read_csv(csv_path,
@@ -169,7 +165,7 @@ def get_eia_data(region):
             # Usually, this is the last year
             MW_nrgs[nrg]             = eia_max_csv[nrg].max()
 
-    return hourly_cap_pct_nrgs, MW_nrgs
+    return hourly_cap_pct_nrgs, MW_nrgs, sample_years, sample_hours
 
 def init_output_matrix():
     output_header_loc = output_header    
@@ -252,7 +248,6 @@ def fig_gas_and_storage(hourly_MWh_needed,
                         supercharge,
                         year):
     global debug_matrix
-    global sample_years
     
     # This is for debugging.  Want final run of each year.
     if(after_optimize):
@@ -262,7 +257,7 @@ def fig_gas_and_storage(hourly_MWh_needed,
     battery_used = 0.
     molten_used  = 0.
     outage_MWh   = 0.
-    excess       = 0.
+    excess_MWh   = 0.
     hour         = 0.
     # Separate cases for each for loop    
     if (molten_max > 0 and supercharge):
@@ -280,7 +275,7 @@ def fig_gas_and_storage(hourly_MWh_needed,
                     hour_of_need               += molten_charge
                     # Can battery take all the remaining excess
                     battery_charge              = min(battery_max - battery_stored, -hour_of_need)
-                    excess                     += -hour_of_need - battery_charge
+                    excess_MWh                 += -hour_of_need - battery_charge
                         
                  # Enough gas for everybody - most common, does it help to go first?
                 elif (hour_of_need <= gas_max):
@@ -326,7 +321,7 @@ def fig_gas_and_storage(hourly_MWh_needed,
                     debug_matrix.at[row_debug_matrix, 'Battery_Max']    = battery_max
                     debug_matrix.at[row_debug_matrix, 'Battery_Used']   = battery_used
                     debug_matrix.at[row_debug_matrix, 'Battery_Stored'] = battery_stored
-                    debug_matrix.at[row_debug_matrix, 'Excess']         = excess
+                    debug_matrix.at[row_debug_matrix, 'Excess']         = excess_MWh
                
     elif (molten_max > 0):
             # Case of Molten without Supercharge  
@@ -343,7 +338,7 @@ def fig_gas_and_storage(hourly_MWh_needed,
                     hour_of_need               += molten_charge
                     # Can battery take all the remaining excess
                     battery_charge              = min(battery_max - battery_stored, -hour_of_need)
-                    excess                     += -hour_of_need - battery_charge
+                    excess_MWh                 += -hour_of_need - battery_charge
                         
                  # Enough gas for everybody - most common, does it help to go first?
                 elif (hour_of_need <= gas_max):
@@ -387,7 +382,7 @@ def fig_gas_and_storage(hourly_MWh_needed,
                     debug_matrix.at[row_debug_matrix, 'Battery_Max']    = battery_max
                     debug_matrix.at[row_debug_matrix, 'Battery_Used']   = battery_used
                     debug_matrix.at[row_debug_matrix, 'Battery_Stored'] = battery_stored
-                    debug_matrix.at[row_debug_matrix, 'Excess']         = excess
+                    debug_matrix.at[row_debug_matrix, 'Excess']         = excess_MWh
 
     elif (supercharge):
             # Case if No molten, with supercharge
@@ -398,7 +393,7 @@ def fig_gas_and_storage(hourly_MWh_needed,
                     # Can battery take all the remaining excess, with some left over?
                     battery_charge = min(battery_max - battery_stored, -hour_of_need)
                     battery_stored += battery_charge
-                    excess         += -excess - battery_charge
+                    excess_MWh     += -excess_MWh - battery_charge
                         
                  # Enough gas for everybody - most common, does it help to go first?
                 elif (hour_of_need <= gas_max):
@@ -436,7 +431,7 @@ def fig_gas_and_storage(hourly_MWh_needed,
                     debug_matrix.at[row_debug_matrix, 'Battery_Max']    = battery_max
                     debug_matrix.at[row_debug_matrix, 'Battery_Used']   = battery_used
                     debug_matrix.at[row_debug_matrix, 'Battery_Stored'] = battery_stored
-                    debug_matrix.at[row_debug_matrix, 'Excess']         = excess
+                    debug_matrix.at[row_debug_matrix, 'Excess']         = excess_MWh
 
     else:
             # Case if No molten, no supercharge
@@ -448,7 +443,7 @@ def fig_gas_and_storage(hourly_MWh_needed,
                     # Can battery take all the remaining excess, with some left over?
                     battery_charge = min(battery_max - battery_stored, -hour_of_need)
                     battery_stored += battery_charge
-                    excess         += -excess - battery_charge
+                    excess_MWh     += -excess_MWh - battery_charge
                         
                  # Enough gas for everybody - most common, does it help to go first?
                 elif (hour_of_need <= gas_max):
@@ -484,13 +479,10 @@ def fig_gas_and_storage(hourly_MWh_needed,
                     debug_matrix.at[row_debug_matrix, 'Battery_Max']    = battery_max
                     debug_matrix.at[row_debug_matrix, 'Battery_Used']   = battery_used
                     debug_matrix.at[row_debug_matrix, 'Battery_Stored'] = battery_stored
-                    debug_matrix.at[row_debug_matrix, 'Excess']         = excess
+                    debug_matrix.at[row_debug_matrix, 'Excess']         = excess_MWh
 
-    supply_MWh_nrgs['Gas']     = gas_used     / sample_years
-    supply_MWh_nrgs['Battery'] = battery_used / sample_years
-    molten_used                = molten_used  / sample_years
-    excess_MWh                 = excess       / sample_years
-    outage_MWh                 = outage_MWh   / sample_years
+    supply_MWh_nrgs['Gas']     = gas_used
+    supply_MWh_nrgs['Battery'] = battery_used
    
     return supply_MWh_nrgs,     \
            outage_MWh,          \
@@ -531,16 +523,16 @@ def add_output_year(
                   start_knobs,
                   knobs_nrgs,
                   max_add_nrgs,
-                  target_hourly
+                  target_hourly,
+                  sample_years
                   ):
-    global sample_years
 
     output_matrix.at[year, 'Year']            = year
     output_matrix.at[year, 'CO2_Price']       = tweaked_globals['CO2_Price']
-    output_matrix.at[year, 'Outage']          = outage_MWh
+    output_matrix.at[year, 'Outage']          = outage_MWh / sample_years
     output_matrix.at[year, 'Demand']          = tweaked_globals['Demand']
     output_matrix.at[year, 'Molten_Capacity'] = molten_max
-    output_matrix.at[year, 'Molten_Used']     = molten_used
+    output_matrix.at[year, 'Molten_Used']     = molten_used / sample_years 
     
     
     MW_cost     = 0.
@@ -548,31 +540,61 @@ def add_output_year(
     total_CO2   = 0.
     total_MW    = 0.
     total_MWh   = 0.
-    
-    for nrg in nrgs:
-        output_matrix.at[year, nrg + '_MW']         = MW_nrgs[nrg]  
-        output_matrix.at[year, nrg + '_Demand_MWh'] = demand_MWh_nrgs[nrg].sum() / sample_years  
-        output_matrix.at[year, nrg + '_Supply_MWh'] = supply_MWh_nrgs[nrg]
-        output_matrix.at[year, nrg + '_MW_Cost']    = MW_nrgs[nrg]  * tweaked_nrgs.at['perMW', nrg]
-        output_matrix.at[year, nrg + '_MWh_Cost']   = supply_MWh_nrgs[nrg] * tweaked_nrgs.at['perMWh', nrg]
-        output_matrix.at[year, nrg + '_Cost']       = MW_nrgs[nrg]  * tweaked_nrgs.at['perMW', nrg]
-        output_matrix.at[year, nrg + '_Cost']      += supply_MWh_nrgs[nrg] * tweaked_nrgs.at['perMWh', nrg]
-        output_matrix.at[year, nrg + '_CO2_MTon']  = supply_MWh_nrgs[nrg] * tweaked_nrgs.at['CO2_gen', nrg]
-        output_matrix.at[year, nrg + '_CO2_Cost']  = supply_MWh_nrgs[nrg] * tweaked_nrgs.at['CO2_gen', nrg] \
-                                                       * tweaked_globals['CO2_Price']
-        output_matrix.at[year, nrg + '_Start_Knob'] = start_knobs[nrg]
-        output_matrix.at[year, nrg + '_Knob']       = knobs_nrgs[nrg]
-        output_matrix.at[year, nrg + '_Max_Knob']   = max_add_nrgs[nrg]
-        
 
+    if (debug_one_case):
+        # 'Year', 'Supply_Var', 'Supply_matrix', 'Demand_var', 'Demand_matrix']       debug_matrix.at[year * 2, 'demand_MWh_nrgs[solar]] = demand(f'Demand_MWh_nrgs[{nrg}] {demand_MWh_nrgs[nrg]}, \
+        debug_matrix.at[year * 2 + 0, 'Supply_var']    = supply_MWh_nrgs['Solar'] 
+        debug_matrix.at[year * 2 + 0, 'Supply_matrix'] = 0 
+        debug_matrix.at[year * 2 + 0, 'Demand_var']    = demand_MWh_nrgs['Solar'] 
+        debug_matrix.at[year * 2 + 0, 'Supply_matrix'] = 0
+    for nrg in nrgs:
+        # These values need to be scaled by sample_years
+
+        output_matrix.at[year, nrg + '_Demand_MWh'] = \
+            demand_MWh_nrgs[nrg] / sample_years  
+        output_matrix.at[year, nrg + '_Supply_MWh'] = \
+            supply_MWh_nrgs[nrg] / sample_years
+        output_matrix.at[year, nrg + '_MWh_Cost']   = \
+              supply_MWh_nrgs[nrg] * tweaked_nrgs.at['perMWh', nrg] / sample_years
+        output_matrix.at[year, nrg + '_Cost']       = \
+           (MW_nrgs[nrg]  * tweaked_nrgs.at['perMW', nrg]) \
+           + (supply_MWh_nrgs[nrg] * tweaked_nrgs.at['perMWh', nrg] / sample_years)
+        output_matrix.at[year, nrg + '_CO2_MTon']  = \
+            supply_MWh_nrgs[nrg] * tweaked_nrgs.at['CO2_gen', nrg] / sample_years
+        output_matrix.at[year, nrg + '_CO2_Cost']  = \
+            supply_MWh_nrgs[nrg] * tweaked_nrgs.at['CO2_gen', nrg] / sample_years \
+            * tweaked_globals['CO2_Price']
+    # these do not need to be scaled by sample_years
+        output_matrix.at[year, nrg + '_MW']         = \
+            MW_nrgs[nrg]  
+        output_matrix.at[year, nrg + '_MW_Cost']    =  \
+            MW_nrgs[nrg]  * tweaked_nrgs.at['perMW', nrg]
+        output_matrix.at[year, nrg + '_Start_Knob'] = \
+            start_knobs[nrg]
+        output_matrix.at[year, nrg + '_Knob']       = \
+            knobs_nrgs[nrg]
+        output_matrix.at[year, nrg + '_Max_Knob']   = \
+            max_add_nrgs[nrg]    
+    
+# These are summed over the nrgs and scaled by sample_years as required
         MW_cost   += MW_nrgs[nrg]          * tweaked_nrgs.at['perMW', nrg]
-        MWh_cost  += supply_MWh_nrgs[nrg]  * tweaked_nrgs.at['perMWh', nrg]
-        total_CO2 += supply_MWh_nrgs[nrg]  * tweaked_nrgs.at['CO2_gen', nrg]
+        MWh_cost  += supply_MWh_nrgs[nrg]  * tweaked_nrgs.at['perMWh', nrg] / sample_years
+        total_CO2 += supply_MWh_nrgs[nrg]  * tweaked_nrgs.at['CO2_gen', nrg] / sample_years
         # Storage is really not a producer, and its MW is really MWh of capacity
         if (nrg != 'Battery'):
             total_MW    += MW_nrgs[nrg]
-            total_MWh   += supply_MWh_nrgs[nrg]
-    
+            total_MWh   += supply_MWh_nrgs[nrg] / sample_years
+
+
+    # end of "for nrg in nrgs"
+    if (debug_one_case):
+        debug_matrix.at[year * 2 + 1, 'Supply_var']    = supply_MWh_nrgs['Solar'] 
+        debug_matrix.at[year * 2 + 1, 'Supply_matrix'] = \
+            output_matrix.at[year, 'Solar_Supply_MWh']
+        debug_matrix.at[year * 2 + 1, 'Demand_var']    = demand_MWh_nrgs['Solar'] 
+        debug_matrix.at[year * 2 + 1, 'Demand_matrix'] = \
+            output_matrix.at[year, 'Solar_Demand_MWh']
+        
     output_matrix.at[year, 'MW_Cost']            = MW_cost
     output_matrix.at[year, 'MWh_Cost']           = MWh_cost
     output_matrix.at[year, 'Outage_Cost']        = outage_MWh * expensive
@@ -583,7 +605,8 @@ def add_output_year(
     
     output_matrix.at[year, 'Total_MW']    = total_MW 
     output_matrix.at[year, 'Total_MWh']   = total_MWh
-    output_matrix.at[year, 'Total_Target']= target_hourly.sum()
+    output_matrix.at[year, 'Total_Target']= target_hourly.sum() / sample_years
+
     return output_matrix
 
  # Save Output file.  Also called if minimizer error
@@ -650,7 +673,7 @@ def update_data(
     hourly_MWh_needed      = target_hourly.copy()
     MW_total               = MW_nrgs.sum()
     adj_zeros              = 0.
-    hourly_supply_MWh_nrgs = hourly_cap_pct_nrgs.copy()
+    hourly_supply_MWh_nrgs = hourly_cap_pct_nrgs.copy() # * MWh TBD
     supply_MWh_nrgs        = pd.Series(0, index=nrgs, dtype=float)
 
     for nrg in ['Solar','Wind','Nuclear','Coal']:
@@ -918,7 +941,7 @@ def run_minimizer(
                 error_matrix = pd.DataFrame(results_dict)
                 save_matrix(f'Minimizer_Failure-{region}', error_matrix)
                 if (debug_one_case or debug_step_minimizer or debug_final_run):
-                    save_matrix(debug_filename, debug_matrix)
+                    save_matrix(debug_filename, debug_matrix, './Analysis/')
                 raise RuntimeError('Minimizer Failure' )
             
             elif(debug_minimizer):
@@ -945,9 +968,9 @@ def one_case(year):
     #  Optimized Case
     knobs_nrgs = one_case_nrgs.loc[year-1]
     return knobs_nrgs
-def init_data(hourly_cap_pct_nrgs, MW_nrgs, specs_nrgs):
+
+def init_data(hourly_cap_pct_nrgs, MW_nrgs, sample_hours):
     # Initialize data for the zeroth year
-    global sample_years, sample_hours
 
     cap_pct_nrgs      = pd.Series(0,index=nrgs, dtype=float)
     supply_MWh_nrgs   = pd.Series(0,index=nrgs, dtype=float)
@@ -957,8 +980,8 @@ def init_data(hourly_cap_pct_nrgs, MW_nrgs, specs_nrgs):
     # Initialize based on EIA data, normalized to 1 year
     for nrg in nrgs:
         cap_pct_nrgs[nrg]    = hourly_cap_pct_nrgs[nrg].sum()
-        supply_MWh_nrgs[nrg] = cap_pct_nrgs[nrg] * MW_nrgs[nrg] / sample_years
-        hourly_target_MWh   += hourly_cap_pct_nrgs[nrg] * MW_nrgs[nrg] / sample_years   
+        supply_MWh_nrgs[nrg] = cap_pct_nrgs[nrg] * MW_nrgs[nrg]
+        hourly_target_MWh   += hourly_cap_pct_nrgs[nrg] * MW_nrgs[nrg]
         if (supply_MWh_nrgs[nrg] == 0) & (nrg != 'Battery'):
             zero_nrgs[nrg] = 1
             
@@ -966,22 +989,19 @@ def init_data(hourly_cap_pct_nrgs, MW_nrgs, specs_nrgs):
 
 # main is a once-through operation, so we try to do as much calc here as possible
 def do_region(region):
-    global sample_years, sample_hours
 
     start_time    = time.time()
     inbox         = get_inbox()
     years         = inbox.at['Years', 'Initial']
     specs_nrgs    = get_specs_nrgs()
  
-    hourly_cap_pct_nrgs, MW_nrgs = get_eia_data(region) 
-# Initialize based on EIA data, normalized to 1 year
+    hourly_cap_pct_nrgs, MW_nrgs, sample_years, sample_hours = get_eia_data(region) 
+# Initialize based on EIA data
     cap_pct_nrgs,      \
     supply_MWh_nrgs,   \
     hourly_target_MWh, \
     zero_nrgs         \
-        = init_data(hourly_cap_pct_nrgs, MW_nrgs, specs_nrgs)
-    
-    
+        = init_data(hourly_cap_pct_nrgs, MW_nrgs, sample_hours)
 
     output_matrix = init_output_matrix()
 
@@ -1021,7 +1041,8 @@ def do_region(region):
                     start_knobs     = knobs_nrgs,
                     knobs_nrgs      = knobs_nrgs,
                     max_add_nrgs    = knobs_nrgs,
-                    target_hourly   = target_hourly)
+                    target_hourly   = target_hourly,
+                    sample_years    = sample_years)
         
     knobs_nrgs = init_knobs(tweaked_globals=tweaked_globals, tweaked_nrgs=tweaked_nrgs)                
     if (years > 0):                                
@@ -1102,12 +1123,13 @@ def do_region(region):
                   start_knobs     = start_knobs,
                   knobs_nrgs      = knobs_nrgs,
                   max_add_nrgs    = max_add_nrgs,
-                  target_hourly   = target_hourly)
+                  target_hourly   = target_hourly,
+                  sample_years    = sample_years)
 
     # End of years for loop
     output_close(output_matrix, inbox, region)
     if (debug_one_case or debug_step_minimizer or debug_final_run):
-        save_matrix(debug_filename, debug_matrix)
+        save_matrix(debug_filename, debug_matrix, './Analysis/')
     print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes')
     
 # Copied from Stack Overflow:
