@@ -30,8 +30,6 @@ delete_chars   = " !#$%&'()*+, -./:;<=>?@[\\]^{|}~﻿ï»¿"
 
 nrgs           = np.array(['Solar', 'Wind', 'Nuclear', 'Gas', 'Coal', 'Battery'])
 
-others         = np.array(['Hydro', 'Oil', 'Other'])
-
 # Output Matrix Columns
 output_header = pd.Series(['Year', 'CO2_Price', 'Outage', 'Total_MW', 'Total_MWh', 'Total_Target', 'MW_Cost', 'MWh_Cost', 'Outage_Cost','CO2_Cost', 'MW+MWh+Outage_Cost', 'Including_CO2_Cost','Demand', 'Molten_Capacity', 'Molten_Used'])
 param_order   = pd.Series(['MW','Demand_MWh', 'Supply_MWh', 'Cost', 'CO2_Cost', 'CO2_MTon', 'MW_Cost', 'MWh_Cost', 'Start_Knob', 'Knob', 'Max_Knob'])
@@ -75,7 +73,7 @@ if debug_step_minimizer:
 debug_unexpected_change = False
 
 # Save every hour in fig_gas_and_storage final run
-debug_final_hourly = True
+debug_final_hourly = False
 if debug_final_hourly:
     # Note that you can change the debug_matrix_columns to include more or less data
     debug_matrix_columns = pd.Series(['Hour', 'Year', 'Path', 'Hour_of_Need', 'Gas_Max', 'Gas_Used', 
