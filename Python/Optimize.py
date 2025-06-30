@@ -8,6 +8,7 @@ import time
 import warnings
 import multiprocessing as mp
 import traceback
+from shared import df_int_to_float, nrgs 
 
 warnings.filterwarnings('error',module=r'.*Optimize.*')
 
@@ -28,61 +29,27 @@ os.chdir(dirname + '/..')
 # had to add to deletechars, they got inserted at the beginning of the first genfromtext entry.
 delete_chars   = " !#$%&'()*+, -./:;<=>?@[\\]^{|}~﻿ï»¿"
 
-nrgs           = np.array(['Solar', 'Wind', 'Nuclear', 'Gas', 'Coal', 'Battery'])
-
 # Output Matrix Columns
 output_header = pd.Series(['Year', 'CO2_Price', 'Outage', 'Total_MW', 'Total_MWh', 'Total_Target', 'MW_Cost', 'MWh_Cost', 'Outage_Cost','CO2_Cost', 'MW+MWh+Outage_Cost', 'Including_CO2_Cost','Demand', 'Molten_Capacity', 'Molten_Used'])
 param_order   = pd.Series(['MW','Demand_MWh', 'Supply_MWh', 'Cost', 'CO2_Cost', 'CO2_MTon', 'MW_Cost', 'MWh_Cost', 'Start_Knob', 'Knob', 'Max_Knob'])
 tweaked_globals_order = pd.Series(['CO2_Price', 'Demand', 'Interest', 'Molten_Rate'])
 tweaked_nrgs_order    = pd.Series(['Capital','Fixed', 'perMW', 'perMWh', 'Max_PCT', 'Lifetime', 'CO2_gen'])
 
-# used by debug, and other places. *.csv converts 1.0 to 1, so we need to convert it back. 
-def df_int_to_float(df):
-# Identify integer columns and convert them to float
-    int_cols = df.select_dtypes(include=['int']).columns
-    df[int_cols] = df[int_cols].astype(float)
-    return df
-
 #************ Debug Options ************
-# True = do not run parallel processes
+#Select from the following options to debug
+# None                         Normal mode
+
+# debug_one_case               Run one set of knobs/Year - no minimize()
+# debug_step_minimizer         Print minimize results
+# debug_unexpected_change      Print out numbers that should not change in each year
+# debug_final_hourly           Save every hour in fig_gas_and_storage final run
+
+import debug
+
+debug_option = "None"
+debug_matrix, debug_filename, debug_enabled, one_case_nrgs = debug.setup(debug_option)
+# kill_parallel                Do not run parallel processes
 kill_parallel = False
-
-# run one set of knobs/Year - no minimize()
-debug_one_case =  False
-if debug_one_case:
-    one_case_nrgs = pd.read_csv('Analysis/debug_knobs.csv')
-    one_case_nrgs = df_int_to_float(one_case_nrgs)
-    debug_matrix_columns = pd.Series \
-        (['Year', 'Supply_var', 'Supply_matrix', 'Demand_var', 'Demand_matrix'])
-    debug_filename       = 'Debug_One_Case'
-# True = print minimize results
-debug_minimizer = False
-
-# Print out on each step of the minimizer
-debug_step_minimizer = False
-if debug_step_minimizer:
-    debug_matrix_columns = pd.Series(['Year'])
-    for nrg in nrgs:
-        debug_matrix_columns = pd.concat([debug_matrix_columns, pd.Series(['Knob_' + nrg])])
-
-    debug_matrix_columns    = pd.concat([debug_matrix_columns, pd.Series(['Outage', 'Cost'])])
-    debug_filename       = 'Debug_Step'
-
-
-# Print out numbers that should not change in each year
-debug_unexpected_change = False
-
-# Save every hour in fig_gas_and_storage final run
-debug_final_hourly = False
-if debug_final_hourly:
-    # Note that you can change the debug_matrix_columns to include more or less data
-    debug_matrix_columns = pd.Series(['Hour', 'Year', 'Path', 'Hour_of_Need', 'Gas_Max', 'Gas_Used', 
-                                        'Battery_Max','Battery_Used', 'Excess'])
-    debug_filename = 'debug_final_hourly'
-    
-if(debug_one_case or debug_step_minimizer or debug_final_hourly):
-    debug_matrix = pd.DataFrame(columns=debug_matrix_columns)
-
 #******************** End of Globals ***************
 #
 
@@ -309,7 +276,7 @@ def fig_gas_and_storage(hourly_MWh_needed,
                     battery_stored = 0.
                     molten_stored  = 0.
                                     
-                if(debug_final_hourly and after_optimize):
+                if(debug_enabled and debug_option == "debug_final_hourly" and after_optimize):
                     row_debug_matrix = len(debug_matrix)
                     debug_matrix.at[row_debug_matrix, 'Hour']           = hour
                     debug_matrix.at[row_debug_matrix, 'Year']           = year
@@ -370,7 +337,7 @@ def fig_gas_and_storage(hourly_MWh_needed,
                     battery_stored = 0.
                     molten_stored  = 0.
                                     
-                if(debug_final_hourly and after_optimize):
+                if(debug_option == 'debug_final_hourly' and after_optimize):
                     row_debug_matrix = len(debug_matrix)
                     
                     debug_matrix.at[row_debug_matrix, 'Year']           = year
@@ -419,7 +386,7 @@ def fig_gas_and_storage(hourly_MWh_needed,
                     battery_stored = 0.
                     molten_stored  = 0.
                     
-                if(debug_final_hourly and after_optimize):
+                if(debug_option == 'debug_final_hourly' and after_optimize):
                     row_debug_matrix = len(debug_matrix)
                    
                     debug_matrix.at[row_debug_matrix, 'Year']           = year
@@ -467,7 +434,7 @@ def fig_gas_and_storage(hourly_MWh_needed,
                     battery_stored = 0.
                     molten_stored  = 0.
                     
-                if(debug_final_hourly and after_optimize):
+                if(debug_option == 'debug_final_hourly' and after_optimize):
                     row_debug_matrix = len(debug_matrix)
                     
                     debug_matrix.at[row_debug_matrix, 'Year']           = year
@@ -540,8 +507,11 @@ def add_output_year(
     total_MW    = 0.
     total_MWh   = 0.
 
-    if (debug_one_case):
-        # 'Year', 'Supply_Var', 'Supply_matrix', 'Demand_var', 'Demand_matrix']       debug_matrix.at[year * 2, 'demand_MWh_nrgs[solar]] = demand(f'Demand_MWh_nrgs[{nrg}] {demand_MWh_nrgs[nrg]}, \
+    if (debug_enabled and debug_option == "debug_one_case"):
+        debug_matrix = debug.debug_one_case_even(debug_matrix, year,
+            supply_MWh_nrgs, demand_MWh_nrgs, output_matrix)
+        # 'Year', 'Supply_Var', 'Supply_matrix', 'Demand_var', 'Demand_matrix']
+        debug_matrix.at[year * 2 + 0, 'Year']          = year
         debug_matrix.at[year * 2 + 0, 'Supply_var']    = supply_MWh_nrgs['Solar'] 
         debug_matrix.at[year * 2 + 0, 'Supply_matrix'] = 0 
         debug_matrix.at[year * 2 + 0, 'Demand_var']    = demand_MWh_nrgs['Solar'] 
@@ -584,17 +554,12 @@ def add_output_year(
         if (nrg != 'Battery'):
             total_MW    += MW_nrgs[nrg]
             total_MWh   += supply_MWh_nrgs[nrg] / sample_years
-
-
     # end of "for nrg in nrgs"
-    if (debug_one_case):
-        debug_matrix.at[year * 2 + 1, 'Supply_var']    = supply_MWh_nrgs['Solar'] 
-        debug_matrix.at[year * 2 + 1, 'Supply_matrix'] = \
-            output_matrix.at[year, 'Solar_Supply_MWh']
-        debug_matrix.at[year * 2 + 1, 'Demand_var']    = demand_MWh_nrgs['Solar'] 
-        debug_matrix.at[year * 2 + 1, 'Demand_matrix'] = \
-            output_matrix.at[year, 'Solar_Demand_MWh']
-        
+
+    if (debug_enabled and debug_option == "debug_one_case"):
+        debug_matrix = debug.debug_one_case_add(debug_matrix, year,
+            supply_MWh_nrgs, demand_MWh_nrgs, output_matrix)
+
     output_matrix.at[year, 'MW_Cost']            = MW_cost
     output_matrix.at[year, 'MWh_Cost']           = MWh_cost
     output_matrix.at[year, 'Outage_Cost']        = outage_MWh * expensive
@@ -610,12 +575,14 @@ def add_output_year(
     return output_matrix
 
  # Save Output file.  Also called if minimizer error
-def output_close(output_matrix, inbox, region):   
+def output_close(output_matrix, debug_matrix, inbox, region):   
     file_name = f'{inbox.at["SubDir", "Text"]}-{region}'
     # minimized returned a really really small number for outage.  Excel couldn't handle it.
     # So rounding it to make that number 0.  Careful if you use really small numbers here.
     output_matrix_t = output_matrix.round(8).transpose()
     save_matrix(file_name, output_matrix_t)
+    if (debug_matrix.size > 1):
+        save_matrix(debug_filename, debug_matrix, file_path='./Python/Mailbox/Outbox/Debug/')
 
 # Cost function used by minimizer
 def cost_function(     
@@ -666,10 +633,6 @@ def update_data(
                supercharge,
                year):    
     
-    # This is for debugging.  Want final run of each year.
-    if(after_optimize):
-        break_me = 1
-        
     hourly_MWh_needed      = target_hourly.copy()
     MW_total               = MW_nrgs.sum()
     adj_zeros              = 0.
@@ -798,7 +761,7 @@ def solve_this(
                outage_MWh      = outage_MWh,
                adj_zeros       = adj_zeros)
 
-    if (debug_step_minimizer and year == 27):
+    if (debug_option == 'debug_step_minimizer' and year == 27):
         row_debug_matrix = len(debug_matrix)
         for nrg in nrgs:
             debug_matrix.at[row_debug_matrix, 'Knob_' + nrg]  = knobs_nrgs[nrg]
@@ -856,11 +819,9 @@ def run_minimizer(
         
     # and retire some old plants
     MW_nrgs = fig_decadence(MW_nrgs, tweaked_nrgs)
-
-    if (debug_one_case):
-        knobs_nrgs   = one_case(year)
-        max_add_nrgs = pd.Series(999.,index=nrgs, dtype=float)
-        start_knobs  = knobs_nrgs
+    global one_case_nrgs
+    if (debug_enabled and debug_option == "debug_one_case"):
+        knobs_nrgs, max_add_nrgs, start_knobs = debug.debug_one_case_init(one_case_nrgs(year))
     else:
         hi_bound = max_add_nrgs.copy()
         lo_bound = pd.Series(0.,index=nrgs, dtype=float)
@@ -879,21 +840,12 @@ def run_minimizer(
             minimizer_failure = False
             call_time = time.time()
             knobs = pd.Series(knobs_nrgs).values
-            if(debug_minimizer):
-                debug_matrix = pd.concat(debug_matrix,pd.Series([f'Start Knobs = {knobs}']))
-                debug_matrix = pd.concat(debug_matrix,pd.Series([f'Max Knobs = {max_add_nrgs}']))
-                debug_matrix = pd.concat(debug_matrix,pd.Series([bnds]))
+            if(debug_enabled and debug_option == 'debug_minimizer'):
+                debug_matrix = debug.debug_minimizer_add2(debug_matrix, knobs, max_add_nrgs, bnds)
                 
-            if(debug_step_minimizer and year == 27):
-                row_debug = len(debug_matrix)
-                debug_matrix.at[row_debug, 'Year'] = year * 100
-                for nrg in nrgs:
-                    debug_matrix.at[row_debug, 'Knob_' + nrg] = knobs_nrgs[nrg]
-                    
-                row_debug += 1
-                debug_matrix.at[row_debug, 'Year'] = year * 100 + 1
-                for nrg in nrgs:
-                    debug_matrix.at[row_debug, 'Knob_' + nrg] = max_add_nrgs[nrg]
+            if(debug_enabled and (debug_option == 'debug_step_minimizer') and year == 26):
+                debug_matrix = debug.debug_step_minimizer(debug_matrix, max_add_nrgs, knobs_nrgs, year) 
+
         
             results =   minimize(
                         solve_this, 
@@ -939,14 +891,13 @@ def run_minimizer(
                     } 
                 error_matrix = pd.DataFrame(results_dict)
                 save_matrix(f'Minimizer_Failure-{region}', error_matrix)
-                if (debug_one_case or debug_step_minimizer or debug_final_hourly):
+                if(debug_matrix.len() > 1):
                     save_matrix(debug_filename, debug_matrix, './Analysis/')
                 raise RuntimeError('Minimizer Failure' )
             
-            elif(debug_minimizer):
-                debug_matrix = pd.concat([debug_matrix, f'fatol {fatol} xatol {xatol}']) 
-                debug_matrix = pd.concat([debug_matrix, f'Knobs  {results.x}']) 
-                debug_matrix = pd.concat([debug_matrix, f'Results {results.fun:,.3f} Time {end_time - call_time:,.2f} with {results.nfev} runs']) 
+            elif(debug_enabled and debug_option == 'debug_minimizer'):
+                debug_matrix = debug.debug_minimizer_add1(debug_matrix, results, fatol, xatol, end_time, call_time, region)
+
             knobs      = results.x
             knobs_nrgs = pd.Series(knobs, index=nrgs, dtype=float)   
             if ((last_result > (results.fun * (1-rerun))) and \
@@ -1128,7 +1079,7 @@ def do_region(region):
 
     # End of years for loop
     output_close(output_matrix, inbox, region)
-    if (debug_one_case or debug_step_minimizer or debug_final_hourly):
+    if (debug_enabled and len(debug_matrix) > 2):
         save_matrix(debug_filename, debug_matrix, './Analysis/')
     print(f'{region} Total Time = {(time.time() - start_time)/60:.2f} minutes')
     
@@ -1158,6 +1109,7 @@ class Process(mp.Process):
 def main():
     inbox         = get_inbox()
     region        = inbox.at['Region', 'Text']
+    global kill_parallel
     
     print('Starting ' + ' ' + inbox.at['SubDir', 'Text'] + ' CO2-' \
           + str(int(inbox.at['CO2_Price','Initial'])) + '_' 
