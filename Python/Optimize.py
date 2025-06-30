@@ -575,14 +575,12 @@ def add_output_year(
     return output_matrix
 
  # Save Output file.  Also called if minimizer error
-def output_close(output_matrix, debug_matrix, inbox, region):   
+def output_close(output_matrix, inbox, region):   
     file_name = f'{inbox.at["SubDir", "Text"]}-{region}'
     # minimized returned a really really small number for outage.  Excel couldn't handle it.
     # So rounding it to make that number 0.  Careful if you use really small numbers here.
     output_matrix_t = output_matrix.round(8).transpose()
     save_matrix(file_name, output_matrix_t)
-    if (debug_matrix.size > 1):
-        save_matrix(debug_filename, debug_matrix, file_path='./Python/Mailbox/Outbox/Debug/')
 
 # Cost function used by minimizer
 def cost_function(     
@@ -1109,7 +1107,6 @@ class Process(mp.Process):
 def main():
     inbox         = get_inbox()
     region        = inbox.at['Region', 'Text']
-    global kill_parallel
     
     print('Starting ' + ' ' + inbox.at['SubDir', 'Text'] + ' CO2-' \
           + str(int(inbox.at['CO2_Price','Initial'])) + '_' 

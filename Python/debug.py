@@ -1,12 +1,14 @@
 import numpy as np
 import pandas as pd
 from shared import df_int_to_float, nrgs
-global debug_enabled
+
+debug_enabled = True
 
 def setup(debug_option):
     """
     Setup function to initialize based on debug options.
     """
+    global debug_enabled
     debug_enabled = True # default is true, unless 'None'
     debug_filename = ''
     debug_matrix = pd.DataFrame()  # Initialize an empty DataFrame for debug matrix
