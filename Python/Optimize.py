@@ -48,7 +48,7 @@ tweaked_nrgs_order    = pd.Series(['Capital','Fixed', 'perMW', 'perMWh', 'Max_PC
 
 import debug
 
-debug_option = "None"
+debug_option = "debug_step_minimizer"
 debug_matrix, debug_filename, debug_enabled, one_case_nrgs = debug.setup(debug_option)
 
 # kill_parallel                Do not run parallel processes
@@ -63,6 +63,7 @@ def save_matrix(file_name, matrix, file_path='./Python/Mailbox/Outbox/'):
         if os.path.exists(full_path):
             os.remove(full_path)
         matrix.to_csv(full_path)
+        print('csv saved to', full_path)
       
 
 # Get price, CO2 generated, etc for each nrg
@@ -526,8 +527,8 @@ def solve_this(
 
     if (debug_enabled and debug_option == 'debug_step_minimizer'):
         debug_matrix = debug.debug_step_minimizer( \
-            debug_matrix, knobs_nrgs, outage_MWh, cost,
-            gen_MWh_nrgs, MW_nrgs, tweaked_nrgs, tweaked_globals)
+            debug_matrix, year, outage_MWh, gen_MWh_nrgs['Gas'], gen_MWh_nrgs['Coal'],
+            cost, knobs_nrgs['Gas'], knobs_nrgs['Coal'])
         
     return cost #This is a return from solve_this
 
@@ -582,13 +583,12 @@ def run_minimizer(
     else:
         hi_bound = max_add_nrgs.copy()
         lo_bound = pd.Series(0.,index=nrgs, dtype=float)
-        # Gas and Storage are as needed.  If knob < 1, is same as knob = 1 - no new capacity built
-        lo_bound['Gas']     = 1.0
         lo_bound['Battery'] = 1.0
         bnds     = Bounds(lo_bound, hi_bound, True)
+        print(bnds)
         method = 'Nelder-Mead'
-        fatol  = .0001
-        xatol = .00001
+        fatol  = 1e-4
+        xatol = 1e-6
         rerun = .01
         opt_done = False
         last_result = 0.
@@ -711,7 +711,7 @@ def do_region(region):
         avg_cost_per_hour += gen_MWh_nrgs[nrg].sum() * specs_nrgs.at ['Variable', nrg] / (365.25*24)
         avg_cost_per_hour += MW_nrgs[nrg]               * specs_nrgs.at['Fixed', nrg]    / (365.25*24)
 
-    expensive = avg_cost_per_hour * 100
+    expensive = avg_cost_per_hour * 1
     
     battery_stored = 0.
     outage_MWh     = 0.
