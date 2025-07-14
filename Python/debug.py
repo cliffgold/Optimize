@@ -17,54 +17,44 @@ def setup(debug_option):
     match debug_option:
         case 'None':
             debug_enabled = False
-        case 'debug_one_case':
-            one_case_nrgs = pd.read_csv('Analysis/debug_knobs.csv')
-            one_case_nrgs = df_int_to_float(one_case_nrgs)
-            debug_matrix_columns = pd.Series \
-                (['Year', 'Supply_var', 'Supply_matrix', 'Demand_var', 'Demand_matrix'])
-            debug_filename       = 'Debug_One_Case'
-            debug_matrix = pd.DataFrame(columns=debug_matrix_columns)    
-        case 'debug_step_minimizer':
-            debug_matrix_columns = pd.Series (['Year'] )
-            for nrg in nrgs:
-                debug_matrix_columns = pd.concat([debug_matrix_columns, pd.Series(['Knob_' + nrg])])
 
-            debug_matrix_columns    = pd.concat([debug_matrix_columns, pd.Series(['Outage', 'Cost'])])
+        case 'debug_one_case':
+            one_case_nrgs        = pd.read_excel('Analysis/One_Case_Nrgs.xlsx')
+    #        one_case_nrgs        = df_int_to_float(one_case_nrgs)
+            debug_matrix_columns = pd.Series \
+                (['Year', 'Excess MWh', 'Total_Curtailed'])
+            debug_filename       = 'Debug_One_Case'
+            debug_matrix         = pd.DataFrame(columns=debug_matrix_columns)
+
+        case 'debug_step_minimizer':
+            debug_matrix_columns= pd.Series(['Year','Outage', 'MWh_Gas', 'MWh_Coal', 
+                                             'Cost', 'Knob_Gas', 'Knob_Coal'])
+#            for nrg in nrgs:
+#                debug_matrix_columns = pd.concat([debug_matrix_columns, pd.Series(['Knob_' + nrg])])
+#                debug_matrix_columns = pd.concat([debug_matrix_columns, pd.Series(['CO2_cost_' + nrg])])
+#                debug_matrix_columns = pd.concat([debug_matrix_columns, pd.Series(['MWh_cost_' + nrg])])
+#                debug_matrix_columns = pd.concat([debug_matrix_columns, pd.Series(['MW_cost_' + nrg])])
             debug_filename       = 'Debug_Step'
             debug_matrix = pd.DataFrame(columns=debug_matrix_columns)
+            
         case 'debug_final_hourly':
     # Note that you can change the debug_matrix_columns to include more or less data
-            debug_matrix_columns = pd.Series(['Hour', 'Year', 'Path', 'Hour_of_Need', 'Gas_Max', 'Gas_Used', 
-                                        'Battery_Max','Battery_Used', 'Excess'])
+            debug_matrix_columns = pd.Series(['Hour', 'Year', 'Path', 'Hour_of_Need', 
+                                                'Gas_Max', 'Gas_Used', 
+                                                'Battery_Max','Battery_Used', 'Excess'])
             debug_filename = 'debug_final_hourly'
             debug_matrix = pd.DataFrame(columns=debug_matrix_columns)
-        case 'debug_final_hourly':
-            pass     
+   
         case _:
             raise ValueError(f"Unknown debug option: {debug_option}")
+
     return debug_matrix, debug_filename, debug_enabled, one_case_nrgs
 
-  
-def debug_one_case_odd(debug_matrix, year, supply_MWh_nrgs, demand_MWh_nrgs, output_matrix):
-    """
-    Debug function for a single case.
-    """
-    debug_matrix.at[year * 2 + 1, 'Supply_var'] = supply_MWh_nrgs['Solar']
-    debug_matrix.at[year * 2 + 1, 'Supply_matrix'] = \
-        output_matrix.at[year, 'Solar_Supply_MWh']
-    debug_matrix.at[year * 2 + 1, 'Demand_var'] = demand_MWh_nrgs['Solar']
-    debug_matrix.at[year * 2 + 1, 'Demand_matrix'] = \
-        output_matrix.at[year, 'Solar_Demand_MWh']
+def debug_one_case_year(debug_matrix, year, excess_MWh, total_curtailed):
+    debug_matrix.at[year, 'Excess MWh']      = excess_MWh
+    debug_matrix.at[year, 'Total Curtailed'] = total_curtailed
     
     return debug_matrix 
-
-def debug_one_case_even(debug_matrix, year, supply_MWh_nrgs, demand_MWh_nrgs):
-      # 'Year', 'Supply_Var', 'Supply_matrix', 'Demand_var', 'Demand_matrix']
-    debug_matrix.at[year * 2 + 0, 'Year']          = year
-    debug_matrix.at[year * 2 + 0, 'Supply_var']    = supply_MWh_nrgs['Solar'] 
-    debug_matrix.at[year * 2 + 0, 'Supply_matrix'] = 0 
-    debug_matrix.at[year * 2 + 0, 'Demand_var']    = demand_MWh_nrgs['Solar'] 
-    debug_matrix.at[year * 2 + 0, 'Supply_matrix'] = 0
 
 def debug_minimizer_add1(debug_matrix, results, fatol, xatol, end_time, call_time):
     """
@@ -73,16 +63,8 @@ def debug_minimizer_add1(debug_matrix, results, fatol, xatol, end_time, call_tim
     debug_matrix = pd.concat([debug_matrix, pd.Series(f'fatol {fatol} xatol {xatol}')])
     debug_matrix = pd.concat([debug_matrix, pd.Series(f'Knobs  {results.x}')])
     debug_matrix = pd.concat([debug_matrix, pd.Series(f'Results {results.fun:,.3f} Time {end_time - call_time:,.2f} with {results.nfev} runs')])
-    
     return debug_matrix 
-def debug_one_case_init(knobs_nrgs):
-    """
-    Init for each year's run
-    """
-    max_add_nrgs = pd.Series(999.,index=nrgs, dtype=float)
-    start_knobs  = knobs_nrgs
-    return knobs_nrgs, max_add_nrgs, start_knobs
- 
+
 def debug_minimizer_add2(debug_matrix, knobs, max_add_nrgs, bnds):
     """
     Adds debug information for the minimizer.
@@ -93,13 +75,28 @@ def debug_minimizer_add2(debug_matrix, knobs, max_add_nrgs, bnds):
     
     return debug_matrix 
 
-def debug_step_minimizer(debug_matrix, max_add_nrgs, knobs_nrgs, year):
+def debug_step_minimizer(debug_matrix, year, outage_MWh, MWh_gas, MWh_coal, cost, Knob_Gas, Knob_Coal):
     row_debug = len(debug_matrix)
-    debug_matrix.at[row_debug, 'Year'] = year * 100
-    for nrg in nrgs:
-        debug_matrix.at[row_debug, 'Knob_' + nrg] = knobs_nrgs[nrg]
-        
-    row_debug += 1
-    debug_matrix.at[row_debug, 'Year'] = year * 100 + 1
-    for nrg in nrgs:
-        debug_matrix.at[row_debug, 'Knob_' + nrg] = max_add_nrgs[nrg]
+#    for nrg in nrgs:
+#        debug_matrix.at[row_debug, 'Knob_' + nrg] = knobs_nrgs[nrg]
+#        debug_matrix.at[row_debug, 'CO2_cost_' + nrg] = \
+#                      gen_MWh_nrgs[nrg]                      \
+#                    * tweaked_nrgs.at['CO2_gen', nrg]        \
+#                    * tweaked_globals['CO2_Price']
+#        debug_matrix.at[row_debug, 'MWh_cost_' + nrg] = \
+#                    gen_MWh_nrgs[nrg]                   \
+#                  * tweaked_nrgs.at['perMWh', nrg]
+#        debug_matrix.at[row_debug, 'MW_cost_' + nrg] = \
+#                    MW_nrgs[nrg]                   \
+#                  * tweaked_nrgs.at['perMW', nrg]
+    debug_matrix.at[row_debug, 'Year']      = year    
+    debug_matrix.at[row_debug, 'Outage']    = outage_MWh
+    debug_matrix.at[row_debug, 'MWh_Gas']   = MWh_gas
+    debug_matrix.at[row_debug, 'MWh_Coal']  = MWh_coal
+    debug_matrix.at[row_debug, 'Cost']      = cost
+    debug_matrix.at[row_debug, 'Knob_Gas']  = Knob_Gas
+    debug_matrix.at[row_debug, 'Knob_Coal'] = Knob_Coal
+
+    return debug_matrix    
+
+
