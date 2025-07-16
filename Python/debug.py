@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 from shared import df_int_to_float, nrgs
 
-debug_enabled = True
 
 def setup(debug_option):
     """
@@ -10,13 +9,15 @@ def setup(debug_option):
     """
     global debug_enabled
     debug_enabled = True # default is true, unless 'None'
+    one_case_nrgs  = pd.DataFrame(columns = nrgs)
+    debug_matrix   = pd.DataFrame()
     debug_filename = ''
-    debug_matrix = pd.DataFrame()  # Initialize an empty DataFrame for debug matrix
-    one_case_nrgs = pd.DataFrame()  # Initialize an empty DataFrame for one case energies
-
+    
     match debug_option:
         case 'None':
             debug_enabled = False
+            debug_matrix = pd.DataFrame()
+            debug_filename = ''
 
         case 'debug_one_case':
             one_case_nrgs        = pd.read_excel('Analysis/One_Case_Nrgs.xlsx')
@@ -27,13 +28,10 @@ def setup(debug_option):
             debug_matrix         = pd.DataFrame(columns=debug_matrix_columns)
 
         case 'debug_step_minimizer':
-            debug_matrix_columns= pd.Series(['Year','Outage', 'MWh_Gas', 'MWh_Coal', 
-                                             'Cost', 'Knob_Gas', 'Knob_Coal'])
-#            for nrg in nrgs:
-#                debug_matrix_columns = pd.concat([debug_matrix_columns, pd.Series(['Knob_' + nrg])])
-#                debug_matrix_columns = pd.concat([debug_matrix_columns, pd.Series(['CO2_cost_' + nrg])])
-#                debug_matrix_columns = pd.concat([debug_matrix_columns, pd.Series(['MWh_cost_' + nrg])])
-#                debug_matrix_columns = pd.concat([debug_matrix_columns, pd.Series(['MW_cost_' + nrg])])
+            debug_matrix_columns= pd.Series(['Year','Outage', 'Cost'])
+            for nrg in nrgs:
+                debug_matrix_columns = pd.concat([debug_matrix_columns, pd.Series(['Knob_' + nrg])])
+                debug_matrix_columns = pd.concat([debug_matrix_columns, pd.Series(['MWh_' + nrg])])
             debug_filename       = 'Debug_Step'
             debug_matrix = pd.DataFrame(columns=debug_matrix_columns)
             
@@ -56,13 +54,13 @@ def debug_one_case_year(debug_matrix, year, excess_MWh, total_curtailed):
     
     return debug_matrix 
 
-def debug_minimizer_add1(debug_matrix, results, fatol, xatol, end_time, call_time):
+def debug_minimizer_add1(debug_matrix, results, fatol, xatol, end_time, region):
     """
     Debug function for the minimizer.
     """
     debug_matrix = pd.concat([debug_matrix, pd.Series(f'fatol {fatol} xatol {xatol}')])
     debug_matrix = pd.concat([debug_matrix, pd.Series(f'Knobs  {results.x}')])
-    debug_matrix = pd.concat([debug_matrix, pd.Series(f'Results {results.fun:,.3f} Time {end_time - call_time:,.2f} with {results.nfev} runs')])
+    debug_matrix = pd.concat([debug_matrix, pd.Series(f'Results {results.fun:,.3f} Time {end_time:,.2f} with {results.nfev} runs')])
     return debug_matrix 
 
 def debug_minimizer_add2(debug_matrix, knobs, max_add_nrgs, bnds):
@@ -75,28 +73,19 @@ def debug_minimizer_add2(debug_matrix, knobs, max_add_nrgs, bnds):
     
     return debug_matrix 
 
-def debug_step_minimizer(debug_matrix, year, outage_MWh, MWh_gas, MWh_coal, cost, Knob_Gas, Knob_Coal):
+def debug_step_minimizer(debug_matrix, year, outage_MWh, knobs_nrgs, MWh_nrgs, cost):
     row_debug = len(debug_matrix)
-#    for nrg in nrgs:
-#        debug_matrix.at[row_debug, 'Knob_' + nrg] = knobs_nrgs[nrg]
-#        debug_matrix.at[row_debug, 'CO2_cost_' + nrg] = \
-#                      gen_MWh_nrgs[nrg]                      \
-#                    * tweaked_nrgs.at['CO2_gen', nrg]        \
-#                    * tweaked_globals['CO2_Price']
-#        debug_matrix.at[row_debug, 'MWh_cost_' + nrg] = \
-#                    gen_MWh_nrgs[nrg]                   \
-#                  * tweaked_nrgs.at['perMWh', nrg]
-#        debug_matrix.at[row_debug, 'MW_cost_' + nrg] = \
-#                    MW_nrgs[nrg]                   \
-#                  * tweaked_nrgs.at['perMW', nrg]
+    for nrg in nrgs:
+        debug_matrix.at[row_debug, 'Knob_' + nrg] = knobs_nrgs[nrg]
+        debug_matrix.at[row_debug, 'MWh_' + nrg] = MWh_nrgs[nrg]        
+
     debug_matrix.at[row_debug, 'Year']      = year    
     debug_matrix.at[row_debug, 'Outage']    = outage_MWh
-    debug_matrix.at[row_debug, 'MWh_Gas']   = MWh_gas
-    debug_matrix.at[row_debug, 'MWh_Coal']  = MWh_coal
     debug_matrix.at[row_debug, 'Cost']      = cost
-    debug_matrix.at[row_debug, 'Knob_Gas']  = Knob_Gas
-    debug_matrix.at[row_debug, 'Knob_Coal'] = Knob_Coal
-
-    return debug_matrix    
+    if (row_debug > 100):
+        abort = True
+    else:
+        abort = False
+    return debug_matrix, abort
 
 
