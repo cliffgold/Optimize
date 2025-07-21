@@ -1,9 +1,8 @@
 import numpy as np
 import pandas as pd
-from shared import df_int_to_float, nrgs
 
 
-def setup(debug_option):
+def setup(debug_option, nrgs):
     """
     Setup function to initialize based on debug options.
     """
@@ -20,8 +19,7 @@ def setup(debug_option):
             debug_filename = ''
 
         case 'debug_one_case':
-            one_case_nrgs        = pd.read_excel('Analysis/One_Case_Nrgs.xlsx')
-    #        one_case_nrgs        = df_int_to_float(one_case_nrgs)
+            one_case_nrgs  = pd.read_excel('Analysis/One_Case_Nrgs.xlsx')
             debug_matrix_columns = pd.Series \
                 (['Year', 'Excess MWh', 'Total_Curtailed'])
             debug_filename       = 'Debug_One_Case'
@@ -54,7 +52,7 @@ def debug_one_case_year(debug_matrix, year, excess_MWh, total_curtailed):
     
     return debug_matrix 
 
-def debug_minimizer_add1(debug_matrix, results, fatol, xatol, end_time, region):
+def debug_minimizer_add1(debug_matrix, results, fatol, xatol, end_time):
     """
     Debug function for the minimizer.
     """
@@ -73,8 +71,9 @@ def debug_minimizer_add2(debug_matrix, knobs, max_add_nrgs, bnds):
     
     return debug_matrix 
 
-def debug_step_minimizer(debug_matrix, year, outage_MWh, knobs_nrgs, MWh_nrgs, cost):
+def debug_step_minimizer(debug_matrix, year, outage_MWh, knobs_nrgs, MWh_nrgs, cost, nrgs):
     row_debug = len(debug_matrix)
+ 
     for nrg in nrgs:
         debug_matrix.at[row_debug, 'Knob_' + nrg] = knobs_nrgs[nrg]
         debug_matrix.at[row_debug, 'MWh_' + nrg] = MWh_nrgs[nrg]        
@@ -82,10 +81,11 @@ def debug_step_minimizer(debug_matrix, year, outage_MWh, knobs_nrgs, MWh_nrgs, c
     debug_matrix.at[row_debug, 'Year']      = year    
     debug_matrix.at[row_debug, 'Outage']    = outage_MWh
     debug_matrix.at[row_debug, 'Cost']      = cost
-    if (row_debug > 100):
-        abort = True
-    else:
-        abort = False
+
+    abort = False
+#    if (row_debug > 100):
+#        abort = True
+ 
     return debug_matrix, abort
 
 
