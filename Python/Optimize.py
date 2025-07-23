@@ -261,8 +261,8 @@ def fig_hourly (
 
     # Note that there is some fancy pandas footwork here.
     # Hard to read, but it is fast.
-    battery_used  = 0.
-    battery_needed = battery_max - battery_stored
+    battery_used   = 0.
+    battery_empty  = battery_max - battery_stored
     outage_MWh     = 0.
     MWh_used_nrgxs = np.zeros((len(nrgs)), dtype=np.float32)
     # apply max MWh to entire grid. best case - hopefully no outage
@@ -270,24 +270,29 @@ def fig_hourly (
         hourly_MWh_needed   -= hourly_MWh_avail_nrgxs[nrgx]
     # Now, lets see if the battery can help
     # Charge the battery with excess, then use it to fill in the need
+    # Battery Variables:
+    #   battery_avail:  Battery storage to be used for need this hour.
+    #   MWh_avail:      Excess to be used to charge battery this hourl
+    #   battery_empty:  Empty part of battery
+    #   battery_stored: Full part of battery
+    #   battery_used:   Total battery output
     for hour in range(len(hourly_MWh_needed)):
-        MWh = hourly_MWh_needed[hour]
-        if (MWh < 0) and (battery_needed > 0):
+        MWh_needed = hourly_MWh_needed[hour]
+        if (MWh_needed < 0) and (battery_empty  > 0):
             # Charge battery with excess
-            battery_avail      = min(battery_needed, -MWh)
-            battery_needed    -= battery_avail
-            battery_stored    += battery_avail
-            battery_used      += battery_avail
-            MWh               -= battery_avail
+            battery_avail      = min(battery_empty , -MWh_needed)
+            battery_empty     -= battery_avail 
+            battery_stored    += battery_avail 
+            MWh_needed        += battery_avail 
 
-        elif (MWh > 0) and (battery_stored > 0):
+        elif (MWh_needed > 0) and (battery_stored > 0):
             # If there is a need, use battery to fill it
-            battery_avail    = min(battery_stored, MWh)
-            battery_used    += battery_avail
-            battery_stored  -= battery_avail
-            MWh             -= battery_avail
+            MWh_avail        = min(battery_stored, MWh_needed)
+            battery_used    += MWh_avail 
+            battery_stored  -= MWh_avail 
+            MWh_needed      -= MWh_avail 
         
-        hourly_MWh_needed[hour] = MWh
+        hourly_MWh_needed[hour] = MWh_needed
 
     # Now, take care of excess    
     hourly_excess = -np.where(hourly_MWh_needed < 0, hourly_MWh_needed, 0)
