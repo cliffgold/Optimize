@@ -53,9 +53,10 @@ param_order   = pd.Series(['MW', 'MWh', 'TBD', 'Cost', 'CO2_Cost', 'CO2_MTon', '
 tweaked_globals_order = pd.Series(['CO2_Price', 'Demand', 'Interest'])
 tweaked_nrgs_order    = pd.Series(['Capital','Fixed', 'perMW', 'perMWh', 'Max_PCT', 'Lifetime', 'CO2_gen'])
 
-# These are used all over the place.  fig+eia fills them. Just lazy.
+# These are used all over the place.  get_eia_data fills them. Just lazy.
 sample_years = 0
 sample_hours = 0
+first_year   = 0
 
 #************ Debug Options ************
 #Select from the following options to debug
@@ -153,7 +154,7 @@ def get_all_regions():
 #      They are assumed to grow with demand.
 #   Also note that gas and storage are figured as fill-in at the end of each test run.
 def get_eia_data(region):
-    global sample_years, sample_hours
+    global sample_years, sample_hours, first_year
     eia_filename = f'{region}_master.csv'
     csv_path = f'./csv/Eia_Hourly/Latest/Hourly_Capacity_values/{eia_filename}'
     eia_cap_csv = pd.read_csv(csv_path,
@@ -181,7 +182,8 @@ def get_eia_data(region):
     MW_nrgs             = pd.Series(0, index=nrgs, dtype=float)
     sample_years        = len(eia_cap_csv)/(365.25 * 24) 
     sample_hours        = len(eia_cap_csv)
-   
+    first_year          = int(eia_cap_csv['date'][len(eia_cap_csv) - 1000][0:4])
+
     for nrg in nrg_sources:
         hourly_cap_pct_nrgs[nrg] = eia_cap_csv[nrg]
         # This .max() is to pick the maximum value for all years
@@ -336,7 +338,7 @@ def add_output_year(
 
     yr_outage_MWh    = outage_MWh    / sample_years
 
-    output_matrix.at[year, 'Year']          = year
+    output_matrix.at[year, 'Year']          = year + first_year
     output_matrix.at[year, 'CO2_Price']     = tweaked_globals['CO2_Price']
     output_matrix.at[year, 'Outage']        = yr_outage_MWh
     output_matrix.at[year, 'Demand']        = tweaked_globals['Demand']

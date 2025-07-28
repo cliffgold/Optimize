@@ -66,7 +66,7 @@ def URL_constructor(
         ) -> str:
     ''' Construct API URL to submit request '''
     
-    return 'https://api.eia.gov/v2/electricity/rto/fuel-type-data/data/?' + \
+    return 's://api.eia.gov/v2/electricity/rto/fuel-type-data/data/?' + \
         f'api_key={password}&frequency=hourly&data[0]=value&' + \
         f'facets[respondent][]={region}&' + \
         f'facets[fueltype][]={api_energy_code}&' + \
@@ -112,7 +112,7 @@ def get_energy_df_from_api(
     Parameters
     ----------
     first_hour_dt: dt.datetime
-        First datetime.
+        First datetime.http
     last_hour_dt: dt.datetime
         Last datetime.
     total_num_records : int
