@@ -42,16 +42,17 @@ nrgx_sources  = np.array([0, 1, 2, 3, 4])
 storage_nrgx  = 5
 
 # Output Matrix Columns
-# First group is total nrgs.  Removed molten from earlier, so added TBD's
-output_header = pd.Series(['Year', 'CO2_Price', 'Outage', 'Total_MW', 'Total_MWh', 'Total_Target', 'MW_Cost', 
-                           'MWh_Cost', 'Outage_Cost','CO2_Cost', 'MW+MWh+Outage_Cost', 'Including_CO2_Cost','Demand',
-                           'Iterations', 'TBD1'])
+# First group is total for all nrgs. 
+output_header = pd.Series(['Year', 'CO2_Price', 'Target_GWh', 'Outage_GWh', 
+                           'Outage_Price_per_GWh', 'Iterations'])
 
-param_order   = pd.Series(['MW', 'MWh', 'TBD', 'Cost', 'CO2_Cost', 'CO2_MTon', 'MW_Cost', 'MWh_Cost', 
-                           'Start_Knob', 'Knob', 'Max_Knob'])
+param_order   = pd.Series(['MW', 'GWh', 'Price_per_MW', 'Price_per_GWh', 'CO2_per_GWh', 
+                           'Start_Knob', 'Optimized_Knob', 'Max_Knob',
+                           'Decadence', 'Avg_Cap_Factor'])
 
 tweaked_globals_order = pd.Series(['CO2_Price', 'Demand', 'Interest'])
-tweaked_nrgs_order    = pd.Series(['Capital','Fixed', 'perMW', 'perMWh', 'Max_PCT', 'Lifetime', 'CO2_gen'])
+tweaked_nrgs_order    = pd.Series(['Capital','Fixed', 'perMW', 'perMWh', 
+                                   'Max_PCT', 'Lifetime', 'CO2_gen'])
 
 # These are used all over the place.  get_eia_data fills them. Just lazy.
 sample_years = 0
@@ -196,6 +197,7 @@ def get_eia_data(region):
 def init_output_matrix():
     output_header_loc = output_header    
     for nrg in nrgs:
+        output_header_loc = pd.concat([output_header_loc,pd.Series(nrg)], axis=0, ignore_index=True)
         for param in param_order:
             output_header_loc = pd.concat([output_header_loc,pd.Series([nrg + '_' + param])], axis=0, ignore_index=True)                 
     output_matrix = pd.DataFrame(columns=output_header_loc, dtype=float)
@@ -321,6 +323,7 @@ def fig_hourly (
 
     
 # add another year to the output matrix
+# Note that MWh converted to GWh for output only
 def add_output_year(           
                   MW_nrgs,
                   MWh_nrgs,
@@ -334,74 +337,28 @@ def add_output_year(
                   knobs_nrgs,
                   max_add_nrgs,
                   hourly_target_MWh,
-                  iterations):
-
-    yr_outage_MWh    = outage_MWh    / sample_years
-
-    output_matrix.at[year, 'Year']          = year + first_year
-    output_matrix.at[year, 'CO2_Price']     = tweaked_globals['CO2_Price']
-    output_matrix.at[year, 'Outage']        = yr_outage_MWh
-    output_matrix.at[year, 'Demand']        = tweaked_globals['Demand']
-    output_matrix.at[year, 'Iterations']    = iterations
-
-    MW_cost      = 0.
-    yr_MWh_cost  = 0.
-    yr_total_CO2 = 0.
-    total_MW     = 0.
-    yr_total_MWh = 0.
-
-    yr_MWh_nrgs    = pd.Series(0, index=nrgs, dtype=float)
-
+                  iterations,
+                  hourly_cap_pct_nrgs):
+    # MWh -> GWh (/1000)  per_MWh -> per_GWh (* 1000)
+    output_matrix.at[year, 'Year']                 = year + first_year
+    output_matrix.at[year, 'CO2_Price']            = tweaked_globals['CO2_Price']
+    output_matrix.at[year, 'Target_GWh']           = hourly_target_MWh.sum() / (1000 * sample_years)
+    output_matrix.at[year, 'Outage_GWh']           = outage_MWh / (1000 * sample_years)
+    output_matrix.at[year, 'Outage_Price_per_GWh'] = expensive * 1000
+    output_matrix.at[year, 'Iterations']           = iterations
     
     for nrg in nrgs:
-        yr_MWh_nrgs[nrg]    = MWh_nrgs[nrg]    / sample_years       
-
-        output_matrix.at[year, nrg + '_MWh'] = \
-                            yr_MWh_nrgs[nrg]
-        output_matrix.at[year, nrg + '_MWh_Cost']   = \
-                            yr_MWh_nrgs[nrg] * tweaked_nrgs.at['perMWh', nrg]
-        output_matrix.at[year, nrg + '_Cost']       = \
-                            (MW_nrgs[nrg]  * tweaked_nrgs.at['perMW', nrg]) \
-                            + (yr_MWh_nrgs[nrg] * tweaked_nrgs.at['perMWh', nrg])
-        output_matrix.at[year, nrg + '_CO2_MTon']  = \
-                            yr_MWh_nrgs[nrg] * tweaked_nrgs.at['CO2_gen', nrg]
-        output_matrix.at[year, nrg + '_CO2_Cost']  = \
-                            yr_MWh_nrgs[nrg] * tweaked_nrgs.at['CO2_gen', nrg] \
-                            * tweaked_globals['CO2_Price']
         
-    # these do not need to be scaled by sample_years
-        output_matrix.at[year, nrg + '_MW']         = \
-                            MW_nrgs[nrg]  
-        output_matrix.at[year, nrg + '_MW_Cost']    =  \
-                            MW_nrgs[nrg]  * tweaked_nrgs.at['perMW', nrg]
-        output_matrix.at[year, nrg + '_Start_Knob'] = \
-                            start_knobs[nrg]
-        output_matrix.at[year, nrg + '_Knob']       = \
-                            knobs_nrgs[nrg]
-        output_matrix.at[year, nrg + '_Max_Knob']   = \
-                            max_add_nrgs[nrg]    
-    
-# These are summed over the nrgs and scaled by sample_years as required
-        MW_cost      += MW_nrgs[nrg]          * tweaked_nrgs.at['perMW', nrg]
-        yr_MWh_cost  += yr_MWh_nrgs[nrg]      * tweaked_nrgs.at['perMWh', nrg]
-        yr_total_CO2 += yr_MWh_nrgs[nrg]      * tweaked_nrgs.at['CO2_gen', nrg]
-        # Storage is really not a producer, and its MW is really MWh of capacity
-        if (nrg != 'Storage'):
-            total_MW     += MW_nrgs[nrg]
-            yr_total_MWh += yr_MWh_nrgs[nrg]
-# end of "for nrg in nrgs"
-
-    output_matrix.at[year, 'MW_Cost']            = MW_cost
-    output_matrix.at[year, 'MWh_Cost']           = yr_MWh_cost
-    output_matrix.at[year, 'Outage_Cost']        = yr_outage_MWh * expensive
-    output_matrix.at[year, 'CO2_Cost']           = yr_total_CO2  * tweaked_globals['CO2_Price'] 
-    
-    output_matrix.at[year, 'MW+MWh+Outage_Cost'] = output_matrix[['MW_Cost','MWh_Cost','Outage_Cost']].loc[year].sum()
-    output_matrix.at[year, 'Including_CO2_Cost'] = output_matrix[['MW+MWh+Outage_Cost', 'CO2_Cost']].loc[year].sum()
-    
-    output_matrix.at[year, 'Total_MW']    = total_MW 
-    output_matrix.at[year, 'Total_MWh']   = yr_total_MWh
-    output_matrix.at[year, 'Total_Target']= hourly_target_MWh.sum() / sample_years
+        output_matrix.at[year, nrg + '_MW']                  = MW_nrgs[nrg]
+        output_matrix.at[year, nrg + '_GWh']                 = MWh_nrgs[nrg] / (1000 * sample_years)
+        output_matrix.at[year, nrg + '_Price_per_MW']        = tweaked_nrgs.at['perMW', nrg]
+        output_matrix.at[year, nrg + '_Price_per_GWh']       = tweaked_nrgs.at['perMWh', nrg] * 1000
+        output_matrix.at[year, nrg + '_CO2_per_GWh']         = tweaked_nrgs.at['CO2_gen', nrg] * 1000
+        output_matrix.at[year, nrg + '_Start_Knob']          = start_knobs[nrg]
+        output_matrix.at[year, nrg + '_Optimized_Knob']      = knobs_nrgs[nrg]
+        output_matrix.at[year, nrg + '_Max_Knob']            = max_add_nrgs[nrg]
+        output_matrix.at[year, nrg + '_Decadence']           = 1 - (1/tweaked_nrgs.at['Lifetime', nrg])
+        output_matrix.at[year, nrg + '_Avg_Cap_Factor']   = hourly_cap_pct_nrgs[nrg].sum() / sample_hours
 
     return output_matrix
 
@@ -590,19 +547,17 @@ def run_minimizer(
     # Also note that MW_nrgs['*_Storage'] units are actually MWh of capacity.  Not even compatable.
     MW_total     = MW_nrgs.sum() - MW_nrgs['Storage']
     
-    start_knobs  = pd.Series(0,index=nrgs, dtype=float)
     max_add_nrgs = pd.Series(0,index=nrgs, dtype=float)
     for nrg in nrgs:
         if nrg == 'Storage':
             # Nominal for Storage is always half of max.
-            max_add_nrgs['Storage'] = 2
+            max_add_nrgs['Storage'] = 1
         elif MW_nrgs[nrg] == 0.: 
             max_add_nrgs[nrg] = 10.
         else:    
             max_add_nrgs[nrg] = tweaked_globals['Demand'] + ((tweaked_nrgs.at['Max_PCT', nrg]*MW_total)/MW_nrgs[nrg]) - 1
             
         knobs_nrgs[nrg] = min(knobs_nrgs[nrg], max_add_nrgs[nrg] - .00001)
-        start_knobs[nrg] = knobs_nrgs[nrg].copy()
         
     # and retire some old plants
     MW_nrgs = fig_decadence(MW_nrgs, tweaked_nrgs)
@@ -622,7 +577,8 @@ def run_minimizer(
         rerun = .01
         opt_done = False
         last_result = 0.
-        knobs = pd.Series(max_add_nrgs).values
+        start_knobs = max_add_nrgs
+        knobs = start_knobs.values
         while(not(opt_done)):
             results =   minimize(
                         solve_this, 
@@ -740,19 +696,20 @@ def do_region(region):
     knobs_nrgs  = pd.Series(0., index=nrgs, dtype=float)
     output_matrix = \
                 add_output_year(                          
-                    MW_nrgs           = MW_nrgs,
-                    MWh_nrgs          = MWh_nrgs,
-                    tweaked_globals   = tweaked_globals,
-                    tweaked_nrgs      = tweaked_nrgs,
-                    expensive         = expensive,
-                    outage_MWh        = outage_MWh,
-                    output_matrix     = output_matrix,
-                    year              = 0,
-                    start_knobs       = knobs_nrgs,
-                    knobs_nrgs        = knobs_nrgs,
-                    max_add_nrgs      = knobs_nrgs,
-                    hourly_target_MWh = hourly_target_MWh,
-                    iterations        = 0)
+                    MW_nrgs             = MW_nrgs,
+                    MWh_nrgs            = MWh_nrgs,
+                    tweaked_globals     = tweaked_globals,
+                    tweaked_nrgs        = tweaked_nrgs,
+                    expensive           = expensive,
+                    outage_MWh          = outage_MWh,
+                    output_matrix       = output_matrix,
+                    year                = 0,
+                    start_knobs         = pd.Series(0, index=nrgs, dtype=float),
+                    knobs_nrgs          = pd.Series(0, index=nrgs, dtype=float),
+                    max_add_nrgs        = pd.Series(1, index=nrgs, dtype=float),  # Avoid div-by-zero in Excel
+                    hourly_target_MWh   = hourly_target_MWh,
+                    iterations          = 0,
+                    hourly_cap_pct_nrgs = hourly_cap_pct_nrgs)
         
     knobs_nrgs = init_knobs(tweaked_globals=tweaked_globals, tweaked_nrgs=tweaked_nrgs)                
     if (years > 0):
@@ -809,19 +766,20 @@ def do_region(region):
 # Output     results of this year             
             output_matrix = \
                 add_output_year(         
-                  MW_nrgs           = MW_nrgs,
-                  MWh_nrgs          = MWh_nrgs,
-                  tweaked_globals   = tweaked_globals,
-                  tweaked_nrgs      = tweaked_nrgs,
-                  expensive         = expensive,
-                  outage_MWh        = outage_MWh,
-                  output_matrix     = output_matrix,
-                  year              = year,
-                  start_knobs       = start_knobs,
-                  knobs_nrgs        = knobs_nrgs,
-                  max_add_nrgs      = max_add_nrgs,
-                  hourly_target_MWh = hourly_target_MWh,
-                  iterations        = iterations)
+                  MW_nrgs             = MW_nrgs,
+                  MWh_nrgs            = MWh_nrgs,
+                  tweaked_globals     = tweaked_globals,
+                  tweaked_nrgs        = tweaked_nrgs,
+                  expensive           = expensive,
+                  outage_MWh          = outage_MWh,
+                  output_matrix       = output_matrix,
+                  year                = year,
+                  start_knobs         = start_knobs,
+                  knobs_nrgs          = knobs_nrgs,
+                  max_add_nrgs        = max_add_nrgs,
+                  hourly_target_MWh   = hourly_target_MWh,
+                  iterations          = iterations,
+                  hourly_cap_pct_nrgs = hourly_cap_pct_nrgs)
             
             total_iterations += iterations
     # End of years for loop
