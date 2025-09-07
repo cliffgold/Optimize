@@ -1,1 +1,0 @@
-Calculate specs.  Called by ..\Macros\Specs_Gen.xlsm

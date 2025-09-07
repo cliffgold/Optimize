@@ -118,7 +118,7 @@ def save_matrix(file_name, matrix, file_path='./Python/Mailbox/Outbox/'):
 
 # Get price, CO2 generated, etc for each nrg
 def get_specs_nrgs():
-    specs_nrgs = pd.read_csv('./Calc/Specs.csv',
+    specs_nrgs = pd.read_csv('./CSV/Specs.csv',
                          header    = 0, 
                          skiprows  = 1,
                          sep       = ',', 
