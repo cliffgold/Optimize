@@ -46,7 +46,8 @@ battery_nrgx  = 5
 output_header = pd.Series(['Year', 'CO2_Price', 'Target_GWh', 'Outage_GWh', 
                            'Outage_Price_per_GWh', 'Iterations'])
 
-param_order   = pd.Series(['MW', 'GWh', 'Price_per_MW', 'Price_per_GWh', 'CO2_per_GWh', 
+param_order   = pd.Series(['MW', 'GWh', 'CO2_MT', 'Capital_B$', 'Fixed_B$',
+                           'Variable_B$', 'CO2_per_GWh', 
                            'Start_Knob', 'Optimized_Knob', 'Max_Knob',
                            'Decadence', 'Avg_Cap_Factor'])
 
@@ -117,7 +118,7 @@ def save_matrix(file_name, matrix, file_path='./Python/Mailbox/Outbox/'):
 
 # Get price, CO2 generated, etc for each nrg
 def get_specs_nrgs():
-    specs_nrgs = pd.read_csv('./csv/Specs.csv',
+    specs_nrgs = pd.read_csv('./Calc/Specs.csv',
                          header    = 0, 
                          skiprows  = 1,
                          sep       = ',', 
@@ -149,7 +150,7 @@ def get_all_regions():
 #       This starts at the maximum MWh for the historical data.
 #       Then, it is adjusted each year as plants are retired, new plants are built, and demand changes.
 
-#   Note that nrg sources "Hydro", "Oil" and "Other" are not used in the optimization.
+#   Note that nrg sources 'Hydro', 'Oil' and 'Other' are not used in the optimization.
 #      They are assumed to grow with demand.
 #   Also note that gas and battery are figured as fill-in at the end of each test run.
 def get_eia_data(region):
@@ -261,7 +262,9 @@ def fig_hourly (
         costly_nrgxs,
         hourly_MWh_avail_nrgxs,   
         battery_max,
-        battery_stored):
+        battery_stored,
+        battery_efficiency,
+        battery_MW):
     
     global debug_matrix
 
@@ -281,18 +284,21 @@ def fig_hourly (
     #   battery_empty:  Empty part of battery
     #   battery_stored: Full part of battery
     #   battery_used:   Total battery output
+    #   battery_efficiciency: % of complete charge/discharge cycle.
+    #   battery_MW      Output capability.
     for hour in range(len(hourly_MWh_needed)):
         MWh_needed = hourly_MWh_needed[hour]
         if (MWh_needed < 0) and (battery_empty  > 0):
             # Charge battery with excess
-            battery_avail      = min(battery_empty, -MWh_needed)
+            battery_avail      = min(battery_empty/battery_efficiency, -MWh_needed, battery_MW) \
+                                        * battery_efficiency
             battery_empty     -= battery_avail 
             battery_stored    += battery_avail 
             MWh_needed        += battery_avail 
 
         elif (MWh_needed > 0) and (battery_stored > 0):
             # If there is a need, use battery to fill it
-            MWh_avail        = min(battery_stored, MWh_needed)
+            MWh_avail        = min(battery_stored, MWh_needed, battery_MW)
             battery_used    += MWh_avail 
             battery_stored  -= MWh_avail 
             MWh_needed      -= MWh_avail
@@ -314,8 +320,7 @@ def fig_hourly (
 
     return MWh_used_nrgxs,    \
            outage_MWh,       \
-           battery_stored,   \
-           battery_used
+           battery_stored
 
     
 # add another year to the output matrix
@@ -345,16 +350,21 @@ def add_output_year(
     
     for nrg in nrgs:
         
-        output_matrix.at[year, nrg + '_MW']                  = MW_nrgs[nrg]
-        output_matrix.at[year, nrg + '_GWh']                 = MWh_nrgs[nrg] / (1000 * sample_years)
-        output_matrix.at[year, nrg + '_Price_per_MW']        = tweaked_nrgs.at['perMW', nrg]
-        output_matrix.at[year, nrg + '_Price_per_GWh']       = tweaked_nrgs.at['perMWh', nrg] * 1000
-        output_matrix.at[year, nrg + '_CO2_per_GWh']         = tweaked_nrgs.at['CO2_gen', nrg] * 1000
-        output_matrix.at[year, nrg + '_Start_Knob']          = start_knobs[nrg]
-        output_matrix.at[year, nrg + '_Optimized_Knob']      = knobs_nrgs[nrg]
-        output_matrix.at[year, nrg + '_Max_Knob']            = max_add_nrgs[nrg]
-        output_matrix.at[year, nrg + '_Decadence']           = 1 - (1/tweaked_nrgs.at['Lifetime', nrg])
-        if (nrg != "Battery"):
+        output_matrix.at[year, nrg + '_MW']             = MW_nrgs[nrg]
+        output_matrix.at[year, nrg + '_GWh']            = MWh_nrgs[nrg] / (1000 * sample_years)
+        output_matrix.at[year, nrg + '_CO2_MT']          = MWh_nrgs[nrg] * tweaked_nrgs.at['CO2_gen', nrg] 
+        output_matrix.at[year, nrg + '_Capital_B$']     = MW_nrgs[nrg] \
+                                                          * (tweaked_nrgs.at['perMW', nrg] - tweaked_nrgs.at['Fixed', nrg])
+        output_matrix.at[year, nrg + '_Fixed_B$']       = MW_nrgs[nrg]  * tweaked_nrgs.at['Fixed', nrg]
+        output_matrix.at[year, nrg + '_Variable_B$']    = MWh_nrgs[nrg] * tweaked_nrgs.at['perMWh', nrg]
+        output_matrix.at[year, nrg + '_CO2_B$']         = MWh_nrgs[nrg] * tweaked_nrgs.at['CO2_gen', nrg] \
+                                                          * tweaked_globals.at['CO2_Price']
+        output_matrix.at[year, nrg + '_CO2_per_GWh']    = tweaked_nrgs.at['CO2_gen', nrg] * 1000
+        output_matrix.at[year, nrg + '_Start_Knob']     = start_knobs[nrg]
+        output_matrix.at[year, nrg + '_Optimized_Knob'] = knobs_nrgs[nrg]
+        output_matrix.at[year, nrg + '_Max_Knob']       = max_add_nrgs[nrg]
+        output_matrix.at[year, nrg + '_Decadence']      = 1 - (1/tweaked_nrgs.at['Lifetime', nrg])
+        if (nrg != 'Battery'):
             output_matrix.at[year, nrg + '_Avg_Cap_Factor']  = hourly_cap_pct_nrgs[nrg].sum() / sample_hours
         else:
             output_matrix.at[year, nrg + '_Avg_Cap_Factor']  = 1.0
@@ -402,9 +412,9 @@ def update_data(
                MW_nrgs,
                tweaked_nrgs,
                tweaked_globals,
+               specs_nrgs,
                battery_stored,    
-               hourly_target_MWh, 
-               after_optimize):    
+               hourly_target_MWh):    
     
     hourly_MWh_needed      = np.copy(hourly_target_MWh)
     MW_total               = MW_nrgs.sum()
@@ -436,8 +446,10 @@ def update_data(
                 hourly_MWh_needed      = np.copy(hourly_MWh_needed),
                 costly_nrgxs           = costly_nrgxs,
                 hourly_MWh_avail_nrgxs = hourly_MWh_avail_nrgxs,                   
-                battery_max            = MW_nrgs['Battery'],
-                battery_stored         = battery_stored)
+                battery_max            = MW_nrgs['Battery'] * specs_nrgs.at['Hours', 'Battery'],
+                battery_stored         = battery_stored,
+                battery_efficiency     = specs_nrgs.at['Efficiency', 'Battery'],
+                battery_MW             = MW_nrgs['Battery'])
           
     MWh_nrgs = nrgx2nrg(MWh_used_nrgxs)
         
@@ -457,9 +469,9 @@ def solve_this(
                hourly_target_MWh,   # Target hourly demand for this year
                tweaked_globals,     # Global tweaks
                tweaked_nrgs,        # Tweaks for each nrg
+               specs_nrgs,          # Specifications
                expensive,           # Cost of outage      
-               year,                # Current year
-               after_optimize):
+               year):               # Current year
                
     global debug_matrix
     knobs_nrgs = pd.Series(knobs, index=nrgs, dtype=float)
@@ -479,9 +491,9 @@ def solve_this(
         MW_nrgs              = new_MW_nrgs,
         tweaked_nrgs         = tweaked_nrgs,
         tweaked_globals      = tweaked_globals,
+        specs_nrgs           = specs_nrgs,
         battery_stored       = new_battery_stored,
-        hourly_target_MWh    = hourly_target_MWh,
-        after_optimize       = after_optimize)
+        hourly_target_MWh    = hourly_target_MWh)
                                  
     cost = fig_cost(
                MW_nrgs         = new_MW_nrgs,
@@ -513,42 +525,53 @@ def run_minimizer(
                   hourly_target_MWh,
                   tweaked_globals,
                   tweaked_nrgs,
+                  specs_nrgs,
                   expensive,               
                   knobs_nrgs,
                   inbox,
                   region,
                   output_matrix,
                   iterations,
-                  year,
-                  after_optimize):
+                  year):
     
     global debug_matrix
-   
+    MW_total = MW_nrgs.sum() - MW_nrgs['Battery']
+
     max_add_nrgs = pd.Series(0,index=nrgs, dtype=float)
+    # The logic is:
+    #   Max_PCT is the max rate that MW increased year over year
+    #      as a percentage of the total MW for that year.
+    #      This gets around the problem of starting from zero for battery.
+    #   To get this number, we need to allow it to rebuild from decadence
+    #      plus Max_PCT more.
     for nrg in nrgs:
-        max_add_nrgs[nrg] = tweaked_nrgs.at['Max_PCT', nrg]
-        knobs_nrgs[nrg]   = min(knobs_nrgs[nrg], max_add_nrgs[nrg] - .00001)
+        pct_of_total      = MW_nrgs[nrg]/MW_total
+        decayed           = 1/tweaked_nrgs.at['Lifetime',nrg]
+        rebuild_pct       = decayed*pct_of_total            
+        max_add_nrgs[nrg] = tweaked_nrgs.at['Max_PCT', nrg] + rebuild_pct
+
         
     # and retire some old plants
     MW_nrgs = fig_decadence(MW_nrgs, tweaked_nrgs)
 
-    if (debug_enabled and debug_option == "debug_one_case"):
+    if (debug_enabled and debug_option == 'debug_one_case'):
         knobs_nrgs = one_case_nrgs.iloc[year - 1]
 
     else:
         hi_bound = max_add_nrgs.copy()
         # Can't unbuild - just let it decay
         # Note that the knobs now mean how much to build.
-        lo_bound = pd.Series(0,index=nrgs, dtype=float)
-        bnds     = Bounds(lo_bound, hi_bound, True)
-        method = 'Nelder-Mead'
-        fatol  = .0001
-        xatol = .00001
-        rerun = .01
-        opt_done = False
-        last_result = 0.
+        lo_bound    = pd.Series(0,index=nrgs, dtype=float)
+        bnds        = Bounds(lo_bound, hi_bound, True)
         start_knobs = max_add_nrgs
-        knobs = start_knobs.values
+        knobs       = start_knobs.values
+        method      = 'Nelder-Mead'
+        fatol       = .0001
+        xatol       = .00001
+        rerun       = .01
+        opt_done    = False
+        last_result = 0.
+
         while(not(opt_done)):
             results =   minimize(
                         solve_this, 
@@ -560,9 +583,9 @@ def run_minimizer(
                             hourly_target_MWh,
                             tweaked_globals,
                             tweaked_nrgs,
+                            specs_nrgs,
                             expensive,               
-                            year,
-                            after_optimize
+                            year
                            ),     
                         bounds=bnds,                  
                         method=method, 
@@ -692,8 +715,7 @@ def do_region(region):
 
             hourly_target_MWh = (hourly_target_MWh * tweaked_globals['Demand'])
 
-# Now optimize this year 
-            after_optimize = False           
+# Now optimize this year         
             knobs_nrgs, max_add_nrgs, start_knobs, iterations = \
                 run_minimizer( \
                                 hourly_cap_pct_nrgs = hourly_cap_pct_nrgs,              
@@ -702,15 +724,14 @@ def do_region(region):
                                 hourly_target_MWh   = hourly_target_MWh,
                                 tweaked_globals     = tweaked_globals,
                                 tweaked_nrgs        = tweaked_nrgs,
+                                specs_nrgs          = specs_nrgs,
                                 expensive           = expensive,               
                                 knobs_nrgs          = knobs_nrgs,
                                 inbox               = inbox,
                                 region              = region,
                                 output_matrix       = output_matrix,
                                 iterations          = iterations,
-                                year                = year,
-                                after_optimize      = after_optimize)
-            after_optimize = False
+                                year                = year)
 # Re-run with final optimal numbers 
             MW_nrgs,        \
             battery_stored, \
@@ -722,9 +743,9 @@ def do_region(region):
                         MW_nrgs             = MW_nrgs,
                         tweaked_nrgs        = tweaked_nrgs,
                         tweaked_globals     = tweaked_globals,
+                        specs_nrgs          = specs_nrgs,
                         battery_stored      = battery_stored,
-                        hourly_target_MWh   = hourly_target_MWh,
-                        after_optimize      = after_optimize)
+                        hourly_target_MWh   = hourly_target_MWh)
 
 # Output     results of this year             
             output_matrix = \
