@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(C:\\Users\\cliff\\OneDrive\\Documents\\GenAtomic\\Optimize\\Python/**)",
+      "Read(C:\\Users\\cliff\\OneDrive\\Documents\\GenAtomic\\Optimize\\Python/**)",
+      "Read(C:\\Users\\cliff\\OneDrive\\Documents\\GenAtomic\\Optimize\\Python/**)",
+      "Read(C:\\Users\\cliff\\OneDrive\\Documents\\GenAtomic\\Optimize\\Python/**)",
+      "Read(C:\\Users\\cliff\\OneDrive\\Documents\\GenAtomic\\Optimize\\Python/**)",
+      "Read(C:\\Users\\cliff\\OneDrive\\Documents\\GenAtomic\\Optimize\\Python/**)",
+      "Read(C:\\Users\\cliff\\OneDrive\\Documents\\GenAtomic\\Optimize\\Python/**)",
+      "Read(C:\\Users\\cliff\\OneDrive\\Documents\\GenAtomic\\Optimize\\csv/**)",
+      "Bash(python:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
