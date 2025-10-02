@@ -113,9 +113,9 @@ output_header = pd.Series(['Year', 'CO2_M$_MT', 'Target_MWh', 'Outage_MWh',
                            'Outage_M$_MWh', 'Iterations'])
 
 param_order   = pd.Series(['MW', 'MWh', 'Capital_M$', 'Fixed_M$',
-                           'Variable_M$', 'CO2_M$', 
-                           'Start_Knob', 'Optimized_Knob', 'Max_Knob',
-                           'Decadence', 'Avg_Cap_Factor'])
+                           'Variable_M$', 'CO2_M$', 'CO2_MT',
+                           'Start_Knob', 'Optimized_Knob', 'PCT_Max_Add',
+                           'Decadence'])
 
 # These are used all over the place.  get_eia_data fills them. Just lazy.
 sample_years = 0
@@ -416,21 +416,17 @@ def add_output_year(
         output_matrix.at[year, nrg + '_CO2_M$']         = MWh_nrgxs[nrgx] \
                                                             * tweaked_nrgxs[CO2_MT_MWh, nrgx] \
                                                             * tweaked_globalxs[CO2_M_MT] 
-
+        output_matrix.at[year, nrg + '_CO2_MT']         = MWh_nrgxs[nrgx]  * tweaked_nrgxs[CO2_MT_MWh, nrgx] 
         output_matrix.at[year, nrg + '_Start_Knob']     = first_start_knobs[nrgx]
         output_matrix.at[year, nrg + '_Optimized_Knob'] = knobs_nrgxs[nrgx]
-        output_matrix.at[year, nrg + '_Max_Knob']       = max_add_nrgxs[nrgx]
-        output_matrix.at[year, nrg + '_Decadence']      = 1 - (1/tweaked_nrgxs[Lifetime, nrgx])
-        if (nrg != 'Battery'):
-            output_matrix.at[year, nrg + '_Avg_Cap_Factor']  = hourly_cap_pct_nrgxs[:,nrgx].sum() / sample_hours
-        else:
-            output_matrix.at[year, nrg + '_Avg_Cap_Factor']  = 0
+        output_matrix.at[year, nrg + '_PCT_Max_Add']    = knobs_nrgxs[nrgx] / max_add_nrgxs[nrgx]
+       
 
     return output_matrix
 
  # Save Output file.  Also called if minimizer error
 def output_close(output_matrix, inbox, region):   
-    file_name = f'{inbox.at["SubDir", "Text"]}-JIT-{region}'
+    file_name = f'{inbox.at["SubDir", "Text"]}-{region}'
     # minimized returned a really really small number for outage.  Excel couldn't handle it.
     # So rounding it to make that number 0.  Careful if you use really small numbers here.
     output_matrix_t = output_matrix.round(8).transpose()
