@@ -105,6 +105,7 @@ tweakxs = np.array([Capital_Total_M_MW,
 CO2_M_MT   = 0
 Demand     = 1
 Interest   = 2
+MW_Mult    = 3
 
 # Output Matrix Columns
 # First group is total for all nrgs.
@@ -115,7 +116,7 @@ output_header = pd.Series(['Year', 'CO2_M$_MT', 'Target_MWh', 'Outage_MWh',
 param_order   = pd.Series(['MW', 'MWh', 'Capital_M$', 'Fixed_M$',
                            'Variable_M$', 'CO2_M$', 'CO2_MT',
                            'Start_Knob', 'Optimized_Knob', 'PCT_Max_Add',
-                           'Decadence'])
+                           'Cap_Factor'])
 
 # These are used all over the place.  get_eia_data fills them. Just lazy.
 sample_years = 0
@@ -265,7 +266,7 @@ def init_tweakxs(specxs_nrgxs,inbox):
             specxs_nrgxs[Capital_Total_M_MW, nrgx])
 
         
-    tweaked_globalxs = np.zeros(3, dtype=float)
+    tweaked_globalxs = np.zeros(4, dtype=float)
     tweaked_globalxs[CO2_M_MT] = 0.
     tweaked_globalxs[Demand] = 1
     tweaked_globalxs[Interest] = 0.
@@ -282,15 +283,18 @@ def fig_tweakxs(
     if year == 1:
         loc_ = 'Initial'
         tweaked_globalxs[CO2_M_MT] = inbox.at['CO2_Price', loc_]
-        tweaked_globalxs[Demand] = inbox.at['Demand', loc_] 
+        tweaked_globalxs[Demand]   = inbox.at['Demand', loc_] 
         tweaked_globalxs[Interest] = inbox.at['Interest', loc_]
+        tweaked_globalxs[MW_Mult]  = inbox.at['MW_Mult',  loc_]
     else:
         loc_ = 'Yearly'
         if tweaked_globalxs[CO2_M_MT] < inbox.at['CO2_Price', loc_]:
             tweaked_globalxs[CO2_M_MT] += inbox.at['CO2_Price', 'Initial']
-        tweaked_globalxs[Demand] *= inbox.at['Demand', loc_] 
+
+        tweaked_globalxs[Demand]   *= inbox.at['Demand', loc_] 
         tweaked_globalxs[Interest] *= inbox.at['Interest', loc_]  
-    
+        tweaked_globalxs[MW_Mult]  *= inbox.at['MW_Mult',  loc_]
+
     for nrgx in nrgxs:  # For each energy type
         nrg = nrgx2nrg_lu[nrgx]  # Get string name for inbox lookup
         tweaked_nrgxs[Capital_Total_M_MW, nrgx] *= inbox.at[nrg + '_Capital', loc_]
@@ -303,7 +307,7 @@ def fig_tweakxs(
         tweaked_nrgxs[Capital_M_MW, nrgx] = \
                 (-4 * npf.pmt(tweaked_globalxs[Interest]/4, 
                 tweaked_nrgxs[Lifetime, nrgx]*4,
-                tweaked_nrgxs[Capital_Total_M_MW, nrgx]))        
+                tweaked_nrgxs[Capital_Total_M_MW, nrgx]))
                          
     return tweaked_globalxs, tweaked_nrgxs
 
@@ -420,7 +424,11 @@ def add_output_year(
         output_matrix.at[year, nrg + '_Start_Knob']     = first_start_knobs[nrgx]
         output_matrix.at[year, nrg + '_Optimized_Knob'] = knobs_nrgxs[nrgx]
         output_matrix.at[year, nrg + '_PCT_Max_Add']    = knobs_nrgxs[nrgx] / max_add_nrgxs[nrgx]
-       
+        if(MW_nrgxs[nrgx] == 0):
+            output_matrix.at[year, nrg + '_Cap_Factor']     = 0
+        else:
+            output_matrix.at[year, nrg + '_Cap_Factor']     = (MWh_nrgxs[nrgx] / sample_years)/ \
+                                                                (MW_nrgxs[nrgx] * 365.25 * 24) 
 
     return output_matrix
 
@@ -450,6 +458,7 @@ def sort_costliest(costly_nrgxs,
 
 # Cost function used by minimizer
 @jit(nopython=True) 
+# Note that it is only used by minimizer.  Final costs for the output matrix are defined in add_output_matrix
 def fig_cost(     
                   MW_nrgxs, 
                   MWh_nrgxs,
@@ -460,7 +469,10 @@ def fig_cost(
     cost = 0.
 
     for nrgx in nrgxs:
-        cost += MW_nrgxs[nrgx]  * (tweaked_nrgxs[Capital_M_MW, nrgx] + tweaked_nrgxs[Capital_M_MW, nrgx])
+        # Optimize build cost based on MW_Mult years of running 
+        cost += MW_nrgxs[nrgx]  * tweaked_nrgxs[Capital_M_MW, nrgx] * tweaked_globalxs[MW_Mult]
+        cost += MW_nrgxs[nrgx]  * tweaked_nrgxs[Fixed_M_MW, nrgx]   * tweaked_globalxs[MW_Mult]
+
         cost += MWh_nrgxs[nrgx] * tweaked_nrgxs[Variable_M_MWh, nrgx]
         cost += MWh_nrgxs[nrgx] * tweaked_nrgxs[CO2_MT_MWh, nrgx] * tweaked_globalxs[CO2_M_MT]
         
@@ -629,8 +641,8 @@ def run_minimizer(
         bnds              = Bounds(lo_bound, hi_bound, True)
         start_knobs       = max_add_nrgxs.copy()
         method            = 'Nelder-Mead'
-        fatol             = .0001
-        xatol             = .00001
+        fatol             = .00001
+        xatol             = .000001
         rerun             = .01
         opt_done          = False
         last_result       = 0.
